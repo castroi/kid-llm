@@ -6,9 +6,11 @@ A private AI chat for one 10-year-old on her iPhone, in Hebrew. Static PWA on Ve
 
 - Every change gets its own branch from `main`, named `<type>/<short-description>` (`feat`, `fix`, `chore`, `docs`, `test`). Why: `main` is what gets deployed.
 - Never commit directly to `main`; push the branch and open a pull request. Only the owner merges, after CI is green. (The only exception was the first commit, which created `main`.)
-- Run `npm run lint`, `npm run typecheck` and `npm run test` before pushing. If `npm install` can't run locally, push anyway and let CI check.
+- Run `npm run lint`, `npm run typecheck` and `npm run test:coverage` before pushing. If `npm install` can't run locally, push anyway and let CI check.
+- CI must be green: audit of the shipped libraries, lint, typecheck, unit tests with coverage (thresholds in `vite.config.ts`: 80% lines, statements and functions, 75% branches), build, and Playwright tests in WebKit at iPhone sizes (`e2e/`). New code arrives with its tests.
 - Commit `package-lock.json` with every dependency change. If `npm install` can't run locally, push the `package.json` change to the branch: the "Update lockfile" workflow commits the lockfile there and reruns CI (never on `main`).
-- Open pull requests as drafts. A review agent reviews each one on the pull request itself. Fix findings as new commits; never force-push.
+- Open pull requests as drafts. After every push of a pull request, a code review agent reviews it for security and for personal data (PII): where her chats, her name and the API key are stored, sent or logged. It posts its verdict and findings as a review on the pull request itself. Fix findings as new commits; never force-push. Then post one comment that lists every finding with the commit that fixed it, or why it is left to the owner.
+- Deployment is Vercel's Git integration: every pull request gets a preview deployment, and `main` is production. `vercel.json` holds the build settings and the security headers; there is no deploy workflow and no deploy secret in this repository.
 
 ## Platform decisions
 
