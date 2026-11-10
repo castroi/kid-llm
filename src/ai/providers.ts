@@ -1,5 +1,5 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
-import { sseData } from './sse';
+import { LineTooLongError, sseData } from './sse';
 
 /**
  * One adapter per provider: how to ask for a chat answer and how to check a key.
@@ -25,10 +25,14 @@ export type AiErrorReason =
 export class AiError extends Error {
   constructor(
     readonly reason: AiErrorReason,
-    /** The provider's own message, for the parent; never shown to the kid. */
+    /**
+     * The provider's own message, for the parent area only: never shown to the kid, and
+     * never stored, backed up or logged (a provider may quote part of the request in it).
+     */
     readonly detail = '',
   ) {
-    super(detail ? `${reason}: ${detail}` : reason);
+    // The reason only, so the detail can't travel with the error into a log or a crash report.
+    super(reason);
     this.name = 'AiError';
   }
 }
@@ -43,7 +47,7 @@ export interface ChatMessage {
 
 export interface ChatCall {
   model: string;
-  /** The parent's instructions; sent first, before the conversation. Empty = none. */
+  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first, never empty. */
   systemPrompt: string;
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
@@ -52,6 +56,8 @@ export interface ChatCall {
   fetch: FetchLike;
   /** Called with each piece of the answer as it arrives. */
   onDelta: (text: string) => void;
+  /** Called whenever the provider sends anything, also while a model thinks before it writes. */
+  onAlive: () => void;
 }
 
 export interface ChatResult {
@@ -92,25 +98,58 @@ function errorMessage(error: unknown): string {
   return '';
 }
 
+/** An error answer is a short JSON; more than this isn't downloaded. */
+export const MAX_ERROR_BODY_CHARS = 16 * 1024;
+
+/** Reads at most `max` characters of a response and drops the rest. */
+async function readLimitedText(response: Response, max: number): Promise<string> {
+  if (!response.body) return '';
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = '';
+  try {
+    while (text.length <= max) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  return text;
+}
+
 /** Turns a failed response into an AiError, with the provider's message (without the key) when it sent one. */
 async function failure(response: Response, apiKey: string): Promise<AiError> {
   let detail = '';
   try {
-    detail = errorMessage(((await response.json()) as { error?: unknown })?.error);
+    const text = await readLimitedText(response, MAX_ERROR_BODY_CHARS);
+    if (text.length <= MAX_ERROR_BODY_CHARS) detail = errorMessage((JSON.parse(text) as { error?: unknown })?.error);
   } catch {
-    // not JSON; the status says enough
+    // not JSON, or cut off; the status says enough
   }
   return new AiError(reasonForStatus(response.status), `${response.status}${detail ? ` ${redact(detail, apiKey).slice(0, 300)}` : ''}`);
 }
 
-/** Calls fetch and maps "no answer at all" to `network` (offline, blocked by CORS, or the connection dropped). */
-async function call(fetchFn: FetchLike, url: string, init: RequestInit, apiKey: string): Promise<Response> {
+/** Calls fetch and maps "no answer at all" to `network` (offline, blocked by CORS, a redirect, or the connection dropped). */
+async function call(fetchFn: FetchLike, url: string, init: RequestInit): Promise<Response> {
   try {
-    return await fetchFn(url, init);
+    return await fetchFn(url, { ...init, ...SAFE_FETCH });
   } catch (err) {
     if (init.signal?.aborted) throw err; // send.ts tells a timeout from a stop
-    throw new AiError('network', redact(err instanceof Error ? err.message : String(err), apiKey));
+    throw new AiError('network', errorName(err));
   }
+}
+
+/**
+ * For every call: never follow a redirect (it would resend the key and her whole conversation
+ * to wherever it points), send no cookies, keep nothing in the HTTP cache, send no referrer.
+ */
+export const SAFE_FETCH = { redirect: 'error', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' } as const;
+
+/** The kind of failure only ("TypeError"), never its text: a message could quote the request. */
+function errorName(err: unknown): string {
+  return err instanceof Error ? err.name : 'Error';
 }
 
 function headers(apiKey: string, json: boolean): Record<string, string> {
@@ -126,13 +165,15 @@ interface StreamChunk {
  * Reads a streamed chat answer in the OpenAI-compatible format: one JSON chunk per
  * "data:" line with the next piece of text, then "data: [DONE]".
  */
-async function readChatStream(response: Response, apiKey: string, signal: AbortSignal, onDelta: (text: string) => void): Promise<ChatResult> {
+async function readChatStream(response: Response, { apiKey, signal, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
   if (!response.body) throw new AiError('bad-response', 'no answer body');
   let text = '';
   let finishReason: string | null = null;
+  // An exception from the screen's own code is not a network failure; it passes through as it is.
+  const fromCaller: { thrown: boolean; error?: unknown } = { thrown: false };
   try {
-    for await (const data of sseData(response.body)) {
-      if (signal.aborted) throw new DOMException('The answer was stopped', 'AbortError');
+    for await (const data of sseData(response.body, signal)) {
+      onAlive();
       if (data === '[DONE]') break;
       let chunk: StreamChunk | null;
       try {
@@ -147,36 +188,46 @@ async function readChatStream(response: Response, apiKey: string, signal: AbortS
       if (typeof delta === 'string' && delta) {
         text += delta;
         if (text.length > MAX_ANSWER_CHARS) throw new AiError('bad-response', 'answer too long');
-        onDelta(delta);
+        try {
+          onDelta(delta);
+        } catch (error) {
+          fromCaller.thrown = true;
+          fromCaller.error = error;
+          throw error;
+        }
       }
     }
+    // A stop or a timeout ends the stream quietly (sse.ts); say so, for send.ts to name it.
+    if (signal.aborted) throw new DOMException('The answer was stopped', 'AbortError');
   } catch (err) {
-    if (err instanceof AiError || signal.aborted) throw err; // send.ts tells a timeout from a stop
-    throw new AiError('network', redact(err instanceof Error ? err.message : String(err), apiKey));
+    if (err instanceof AiError || signal.aborted || (fromCaller.thrown && fromCaller.error === err)) throw err;
+    if (err instanceof LineTooLongError) throw new AiError('bad-response', 'line too long');
+    throw new AiError('network', errorName(err));
   }
   return { text, finishReason };
 }
 
 const venice: ProviderAdapter = {
-  async streamChat({ model, systemPrompt, messages, apiKey, signal, fetch, onDelta }) {
+  async streamChat(chat) {
+    const { model, systemPrompt, messages, apiKey, signal, fetch } = chat;
     const init: RequestInit = {
       method: 'POST',
       headers: headers(apiKey, true),
       body: JSON.stringify({
         model,
-        messages: [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages],
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
         stream: true,
         // Venice adds its own system prompt unless told not to; only the parent's goes with her chat.
         venice_parameters: { include_venice_system_prompt: false },
       }),
       signal,
     };
-    const response = await call(fetch, AI_PROVIDERS.venice.endpoints.chat, init, apiKey);
+    const response = await call(fetch, AI_PROVIDERS.venice.endpoints.chat, init);
     if (!response.ok) throw await failure(response, apiKey);
-    return readChatStream(response, apiKey, signal, onDelta);
+    return readChatStream(response, chat);
   },
   async checkKey({ apiKey, signal, fetch }) {
-    const response = await call(fetch, AI_PROVIDERS.venice.endpoints.check, { method: 'GET', headers: headers(apiKey, false), signal }, apiKey);
+    const response = await call(fetch, AI_PROVIDERS.venice.endpoints.check, { method: 'GET', headers: headers(apiKey, false), signal });
     if (!response.ok) throw await failure(response, apiKey);
     return null;
   },
