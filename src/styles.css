@@ -1,0 +1,145 @@
+/*
+ * Colours only through these tokens. No inline styles anywhere: the CSP (vercel.json)
+ * allows only this stylesheet.
+ */
+:root {
+  --bg: #f7f8fc;
+  --surface: #ffffff;
+  --ink: #1a1d2e;
+  --muted: #555b6e;
+  --line: #dde0ea;
+  --accent: #5b45d6;
+  --accent-tint: #eceafb;
+  --on-accent: #ffffff;
+  color-scheme: light;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: -apple-system, system-ui, 'Arial Hebrew', Arial, sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+  overscroll-behavior: none;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+.muted {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The whole screen: dvh follows Safari's bars; the insets keep clear of the notch and the home indicator. */
+.screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  max-width: 560px;
+  margin: 0 auto;
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-inline-start: env(safe-area-inset-left);
+  padding-inline-end: env(safe-area-inset-right);
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 4px 12px;
+}
+
+.top-bar-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.opening {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 20px 0;
+}
+
+.opening-text {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.greeting {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 148px;
+  padding: 16px;
+  text-align: start;
+  background: var(--surface);
+  border: 2px solid var(--line);
+  border-radius: 20px;
+}
+
+.mode-card[aria-pressed='true'] {
+  border-color: var(--accent);
+}
+
+.mode-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  background: var(--accent-tint);
+  color: var(--accent);
+}
+
+.mode-name {
+  font-size: 19px;
+  font-weight: 500;
+}
+
+.mode-description {
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.bottom-note {
+  padding: 16px 20px 20px;
+  text-align: center;
+  font-size: 15px;
+}
