@@ -33,7 +33,7 @@ jobs:
 
       # Known vulnerabilities in the libraries that ship inside the app (not the build tools).
       - name: Audit shipped libraries
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --audit-level=moderate
 
       - name: Lint
         run: npm run lint

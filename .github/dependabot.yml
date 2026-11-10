@@ -1,5 +1,6 @@
 # Weekly pull requests for newer versions of the libraries and of the pinned GitHub Actions.
 # Each one goes through CI and the owner's review like any other change.
+# A release must be a week old first: a hijacked version is usually pulled within days.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -7,8 +8,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    cooldown:
+      default-days: 7
