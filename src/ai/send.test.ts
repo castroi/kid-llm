@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
+import { BASELINE_PROMPT } from './baseline';
 import { AI_PROVIDERS } from './catalog';
-import { AiError, MAX_ANSWER_CHARS, type FetchLike } from './providers';
+import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
+import { MAX_LINE_CHARS } from './sse';
 import { checkConnection, sendChat, type ChatRequest } from './send';
 
 const KEY = 'sk-test-secret';
@@ -103,7 +105,7 @@ describe('sendChat', () => {
     expect(result).toEqual({ text: 'היי מה נשמע?', finishReason: 'stop' });
   });
 
-  it("sends the parent's instructions first, then the whole conversation, to the chat endpoint only", async () => {
+  it("sends the baseline and the parent's instructions first, then the whole conversation, to the chat endpoint only", async () => {
     const { fetch, calls } = fetchStream([piece('7/8'), DONE]);
     const messages: ChatRequest['messages'] = [
       { role: 'user', content: 'כמה זה 3/4 ועוד 1/8?' },
@@ -117,16 +119,41 @@ describe('sendChat', () => {
     expect(calls[0].init.headers).toEqual({ Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' });
     expect(JSON.parse(calls[0].init.body as string)).toEqual({
       model: 'some-model',
-      messages: [{ role: 'system', content: 'Answer in simple Hebrew.' }, ...messages],
+      messages: [{ role: 'system', content: `${BASELINE_PROMPT}\n\nAnswer in simple Hebrew.` }, ...messages],
       stream: true,
       venice_parameters: { include_venice_system_prompt: false },
     });
   });
 
-  it('sends no system message when the parent wrote no instructions', async () => {
+  it('still sends the baseline instructions when the parent wrote none, so she never talks to a model with no instructions', async () => {
     const { fetch, calls } = fetchStream([piece('היי'), DONE]);
-    await sendChat(request(fetch, { systemPrompt: '' }));
-    expect(JSON.parse(calls[0].init.body as string).messages).toEqual([{ role: 'user', content: 'שלום' }]);
+    await sendChat(request(fetch, { systemPrompt: '  ' }));
+    expect(JSON.parse(calls[0].init.body as string).messages).toEqual([
+      { role: 'system', content: BASELINE_PROMPT },
+      { role: 'user', content: 'שלום' },
+    ]);
+    expect(BASELINE_PROMPT).toMatch(/child/);
+  });
+
+  it('never follows a redirect, sends no cookies or referrer, and keeps nothing in the HTTP cache', async () => {
+    const { fetch, calls } = fetchStream([piece('היי'), DONE]);
+    await sendChat(request(fetch));
+    expect(calls[0].init).toMatchObject(SAFE_FETCH);
+    expect(SAFE_FETCH).toEqual({ redirect: 'error', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
+    const check = fetchJson(200, {});
+    await checkConnection('venice', KEY, { fetch: check.fetch });
+    expect(check.calls[0].init).toMatchObject(SAFE_FETCH);
+  });
+
+  it('sends the key without the spaces a paste added, and makes no call without a key', async () => {
+    const { fetch, calls } = fetchStream([piece('היי'), DONE]);
+    await sendChat(request(fetch, { apiKey: `  ${KEY}\n` }));
+    expect(calls[0].init.headers).toMatchObject({ Authorization: `Bearer ${KEY}` });
+
+    const none = fetchStream([piece('היי'), DONE]);
+    expect((await reasonOf(sendChat(request(none.fetch, { apiKey: '   ' })))).reason).toBe('unauthorized');
+    expect((await reasonOf(checkConnection('venice', '', { fetch: none.fetch }))).reason).toBe('unauthorized');
+    expect(none.calls).toHaveLength(0);
   });
 
   it('puts together a line, and a Hebrew letter, that arrive split between network chunks', async () => {
@@ -179,9 +206,88 @@ describe('sendChat', () => {
     expect(req.deltas).toEqual(['חצי תשובה']);
   });
 
-  it('reports no answer at all (offline, or blocked for web pages) as a network problem', async () => {
-    const fetch: FetchLike = () => Promise.reject(new TypeError('Load failed'));
-    expect((await reasonOf(sendChat(request(fetch)))).reason).toBe('network');
+  it('reports no answer at all (offline, or blocked for web pages) as a network problem, without the failure text', async () => {
+    // A failure's text could quote the request: the key or what she wrote.
+    const fetch: FetchLike = () => Promise.reject(new TypeError(`Load failed for ${KEY} שלום`));
+    const err = await reasonOf(sendChat(request(fetch)));
+    expect(err.reason).toBe('network');
+    expect(err.detail).toBe('TypeError');
+    expect(err.message).toBe('network');
+  });
+
+  it('keeps counting a model that thinks before it writes as alive', async () => {
+    // Lines with no text yet (thinking, keep-alives) arrive every 15 ms for longer than the 150 ms limit.
+    const thinking = `data: ${JSON.stringify({ choices: [{ delta: {} }] })}\n\n`;
+    const parts = [...Array.from({ length: 14 }, () => thinking), piece('הנה!'), DONE];
+    let next = 0;
+    const fetch: FetchLike = () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              await new Promise((resolve) => setTimeout(resolve, 15));
+              if (next < parts.length) controller.enqueue(encoder.encode(parts[next++]));
+              else controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    expect((await sendChat(request(fetch, { idleTimeoutMs: 150 }))).text).toBe('הנה!');
+  });
+
+  it('ends the network read at once on stop, even if fetch itself would not', async () => {
+    // A body that ignores the abort signal: only cancelling the reader ends it.
+    const stop = new AbortController();
+    let cancelled = false;
+    let sent = false;
+    const fetch: FetchLike = () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull(controller) {
+              if (!sent) {
+                sent = true;
+                controller.enqueue(encoder.encode(piece('פעם ')));
+                return;
+              }
+              return new Promise<void>(() => undefined);
+            },
+            cancel() {
+              cancelled = true;
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    const req = request(fetch, { signal: stop.signal });
+    const original = req.onDelta;
+    req.onDelta = (text) => {
+      original(text);
+      stop.abort();
+    };
+    expect((await reasonOf(sendChat(req))).reason).toBe('cancelled');
+    expect(cancelled).toBe(true);
+    expect(req.deltas).toEqual(['פעם ']);
+  });
+
+  it('cuts off a line that never ends instead of collecting it', async () => {
+    const endless = 'data: ' + 'x'.repeat(MAX_LINE_CHARS + 10);
+    const { fetch } = fetchStream([endless]);
+    const err = await reasonOf(sendChat(request(fetch)));
+    expect(err.reason).toBe('bad-response');
+    expect(err.detail).toBe('line too long');
+  });
+
+  it("lets an exception from the screen's own code through as it is, not as a network problem", async () => {
+    const { fetch } = fetchStream([piece('היי'), DONE]);
+    const boom = new Error('screen bug');
+    const req = request(fetch, {
+      onDelta: () => {
+        throw boom;
+      },
+    });
+    await expect(sendChat(req)).rejects.toBe(boom);
   });
 
   it.each([
@@ -202,7 +308,43 @@ describe('sendChat', () => {
     const { fetch } = fetchJson(401, { error: { message: `Invalid key ${KEY}` } });
     const err = await reasonOf(sendChat(request(fetch)));
     expect(err.detail).toBe('401 Invalid key ••••');
-    expect(err.message).not.toContain(KEY);
+    expect(err.message).toBe('unauthorized');
+  });
+
+  it('removes the key before cutting a long message, so no part of it is left at the cut', async () => {
+    const { fetch } = fetchJson(401, { error: `${'x'.repeat(298)} ${KEY}` });
+    const err = await reasonOf(sendChat(request(fetch)));
+    expect(err.detail).toHaveLength(304);
+    expect(err.detail).not.toContain('sk-');
+  });
+
+  it("removes the key from an error sent in the middle of an answer and from a failed key check", async () => {
+    const mid = fetchStream([`data: ${JSON.stringify({ error: `bad ${KEY}` })}\n\n`]);
+    expect((await reasonOf(sendChat(request(mid.fetch)))).detail).toBe('bad ••••');
+    const check = fetchJson(403, { error: { message: `key ${KEY} is disabled` } });
+    expect((await reasonOf(checkConnection('venice', KEY, { fetch: check.fetch }))).detail).toBe('403 key •••• is disabled');
+  });
+
+  it("doesn't download an error answer that is far too large", async () => {
+    const { fetch } = fetchJson(500, { error: 'y'.repeat(MAX_ERROR_BODY_CHARS + 100) });
+    const err = await reasonOf(sendChat(request(fetch)));
+    expect(err.reason).toBe('provider-down');
+    expect(err.detail).toBe('500');
+  });
+
+  it('never puts what she wrote or the instructions into an error', async () => {
+    const secretText = 'הסוד שלי';
+    const cases: FetchLike[] = [
+      fetchJson(400, { error: 'bad model' }).fetch,
+      fetchStream([DONE]).fetch,
+      fetchStream([piece('', 'content_filter'), DONE]).fetch,
+      () => Promise.reject(new TypeError('Load failed')),
+    ];
+    for (const fetch of cases) {
+      const err = await reasonOf(sendChat(request(fetch, { messages: [{ role: 'user', content: secretText }] })));
+      expect(`${err.message} ${err.detail}`).not.toContain(secretText);
+      expect(`${err.message} ${err.detail}`).not.toContain('Answer in simple Hebrew');
+    }
   });
 
   it("treats the provider's content filter as a refusal", async () => {
