@@ -15,10 +15,26 @@ const directive = (name: string) =>
     .slice(1) ?? [];
 
 describe('security headers (vercel.json)', () => {
-  it('locks the page down to its own origin', () => {
-    for (const part of ["default-src 'self'", "object-src 'none'", "base-uri 'none'", "frame-ancestors 'none'"]) {
-      expect(csp).toContain(part);
+  it('locks the page down to its own origin, directive by directive', () => {
+    // Exact lists: widening any of them must be a deliberate change to this test.
+    const expected: Record<string, string[]> = {
+      'default-src': ["'self'"],
+      'script-src': ["'self'"],
+      'style-src': ["'self'"],
+      'img-src': ["'self'", 'blob:'],
+      'font-src': ["'self'"],
+      'worker-src': ["'self'"],
+      'manifest-src': ["'self'"],
+      'object-src': ["'none'"],
+      'base-uri': ["'none'"],
+      'form-action': ["'none'"],
+      'frame-ancestors': ["'none'"],
+    };
+    for (const [name, sources] of Object.entries(expected)) {
+      expect(directive(name), name).toEqual(sources);
     }
+    const names = csp.split(';').map((d) => d.trim().split(/\s+/)[0]);
+    expect([...names].sort()).toEqual([...Object.keys(expected), 'connect-src'].sort());
     expect(csp).not.toContain('unsafe-inline');
     expect(csp).not.toContain('unsafe-eval');
   });
@@ -39,6 +55,6 @@ describe('security headers (vercel.json)', () => {
     expect(header('Referrer-Policy')).toBe('no-referrer');
     expect(header('X-Frame-Options')).toBe('DENY');
     expect(header('Permissions-Policy')).toContain('geolocation=()');
-    expect(header('Strict-Transport-Security')).toMatch(/max-age=\d+/);
+    expect(header('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains');
   });
 });
