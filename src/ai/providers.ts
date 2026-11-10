@@ -173,6 +173,8 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
   const fromCaller: { thrown: boolean; error?: unknown } = { thrown: false };
   try {
     for await (const data of sseData(response.body, signal)) {
+      // After her stop (or a timeout) nothing more is written, even if a whole line was already waiting.
+      if (signal.aborted) break;
       onAlive();
       if (data === '[DONE]') break;
       let chunk: StreamChunk | null;

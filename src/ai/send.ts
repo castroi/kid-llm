@@ -12,6 +12,12 @@ import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike } 
 
 /** Nothing from the provider for this long means the call hangs. A long answer is fine: everything it sends restarts the clock. */
 export const CHAT_IDLE_TIMEOUT_MS = 60_000;
+/**
+ * No text of the answer for this long ends the call too, however busy the connection looks:
+ * a model may think for a while before it writes, but a stream of empty lines must not keep
+ * the call open for ever.
+ */
+export const CHAT_NO_TEXT_TIMEOUT_MS = 180_000;
 export const CHECK_TIMEOUT_MS = 20_000;
 
 const defaultFetch: FetchLike = (url, init) => fetch(url, init);
@@ -27,13 +33,15 @@ function usableKey(apiKey: string): string {
 }
 
 /**
- * Runs `work` with a signal that aborts on the caller's stop or after `timeoutMs` without
- * a call to `alive`, and reports which of the two happened.
+ * Runs `work` with a signal that aborts on the caller's stop, after `timeoutMs` without a
+ * call to `alive`, or after `noProgressMs` without a call to `progress`, and reports whether
+ * it was a stop or a timeout.
  */
 async function withDeadline<T>(
   signal: AbortSignal | undefined,
   timeoutMs: number,
-  work: (signal: AbortSignal, alive: () => void) => Promise<T>,
+  work: (signal: AbortSignal, alive: () => void, progress: () => void) => Promise<T>,
+  noProgressMs?: number,
 ): Promise<T> {
   // Stopped before it started: don't call the provider at all.
   if (signal?.aborted) throw new AiError('cancelled');
@@ -48,10 +56,16 @@ async function withDeadline<T>(
     clearTimeout(timer);
     timer = setTimeout(expire, timeoutMs);
   };
+  let progressTimer = noProgressMs === undefined ? undefined : setTimeout(expire, noProgressMs);
+  const progress = () => {
+    if (noProgressMs === undefined) return;
+    clearTimeout(progressTimer);
+    progressTimer = setTimeout(expire, noProgressMs);
+  };
   const onStop = () => controller.abort();
   signal?.addEventListener('abort', onStop);
   try {
-    return await work(controller.signal, alive);
+    return await work(controller.signal, alive, progress);
   } catch (err) {
     // An abort makes fetch (or reading the answer) fail with a plain AbortError; say which abort it was.
     if (controller.signal.aborted && !(err instanceof AiError)) {
@@ -60,6 +74,7 @@ async function withDeadline<T>(
     throw err;
   } finally {
     clearTimeout(timer);
+    clearTimeout(progressTimer);
     signal?.removeEventListener('abort', onStop);
   }
 }
@@ -79,6 +94,7 @@ export interface ChatRequest {
   signal?: AbortSignal;
   fetch?: FetchLike;
   idleTimeoutMs?: number;
+  noTextTimeoutMs?: number;
 }
 
 /**
@@ -88,7 +104,7 @@ export interface ChatRequest {
  */
 export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const apiKey = usableKey(req.apiKey);
-  const result = await withDeadline(req.signal, req.idleTimeoutMs ?? CHAT_IDLE_TIMEOUT_MS, (signal, alive) =>
+  const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
       systemPrompt: systemPromptFor(req.systemPrompt),
@@ -96,10 +112,13 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
       apiKey,
       signal,
       fetch: req.fetch ?? defaultFetch,
-      onDelta: req.onDelta,
+      onDelta: (text) => {
+        progress();
+        req.onDelta(text);
+      },
       onAlive: alive,
-    }),
-  );
+    });
+  const result = await withDeadline(req.signal, req.idleTimeoutMs ?? CHAT_IDLE_TIMEOUT_MS, work, req.noTextTimeoutMs ?? CHAT_NO_TEXT_TIMEOUT_MS);
   if (result.finishReason === 'content_filter') throw new AiError('refused');
   if (result.text === '') throw new AiError('bad-response', 'no answer text');
   return result;
