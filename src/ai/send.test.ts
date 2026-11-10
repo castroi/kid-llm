@@ -133,6 +133,8 @@ describe('sendChat', () => {
       { role: 'user', content: 'שלום' },
     ]);
     expect(BASELINE_PROMPT).toMatch(/child/);
+    // The provider is told no more about her than it needs: no age, no gender.
+    expect(BASELINE_PROMPT).not.toMatch(/\d|\b(she|her|girl|boy|he|his|him)\b/i);
   });
 
   it('never follows a redirect, sends no cookies or referrer, and keeps nothing in the HTTP cache', async () => {
@@ -234,6 +236,40 @@ describe('sendChat', () => {
         ),
       );
     expect((await sendChat(request(fetch, { idleTimeoutMs: 150 }))).text).toBe('הנה!');
+  });
+
+  it('gives up on a stream that stays busy but never writes any text', async () => {
+    // Empty lines every 10 ms keep the connection alive; with no text for 80 ms the call ends anyway.
+    const empty = `data: ${JSON.stringify({ choices: [{ delta: {} }] })}\n\n`;
+    const fetch: FetchLike = (_url, init) =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              await new Promise((resolve) => setTimeout(resolve, 10));
+              if (init.signal?.aborted) controller.error(new DOMException('aborted', 'AbortError'));
+              else controller.enqueue(encoder.encode(empty));
+            },
+          }),
+          { status: 200 },
+        ),
+      );
+    const err = await reasonOf(sendChat(request(fetch, { idleTimeoutMs: 5_000, noTextTimeoutMs: 80 })));
+    expect(err.reason).toBe('timeout');
+  });
+
+  it('writes nothing more after her stop, even when the next line had already arrived', async () => {
+    const stop = new AbortController();
+    // Both pieces arrive in one network chunk; she stops while the first is being shown.
+    const { fetch } = fetchStream([piece('אחת ') + piece('שתיים')], { hang: true });
+    const req = request(fetch, { signal: stop.signal });
+    const original = req.onDelta;
+    req.onDelta = (text) => {
+      original(text);
+      stop.abort();
+    };
+    expect((await reasonOf(sendChat(req))).reason).toBe('cancelled');
+    expect(req.deltas).toEqual(['אחת ']);
   });
 
   it('ends the network read at once on stop, even if fetch itself would not', async () => {
