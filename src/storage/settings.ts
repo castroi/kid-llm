@@ -1,5 +1,6 @@
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
 import { MODES, type ModeId } from '../core/modes';
+import { cut } from '../core/text';
 
 /**
  * What the parent sets, kept in this browser's localStorage: on the phone only.
@@ -13,9 +14,9 @@ export interface Settings {
   provider: AiProviderId;
   /** The provider's model name behind each mode; empty = that mode is not set up yet. */
   models: Record<ModeId, string>;
-  /** The parent's own instructions, sent after the built-in ones. */
+  /** The parent's own instructions, sent after the built-in ones. May describe her; a backup that includes it says so. */
   systemPrompt: string;
-  /** For the greeting only; never sent to the provider. */
+  /** Her name, for the greeting only; never sent to the provider. Personal: a backup that includes it says so. */
   childName: string;
   /** The most messages she can send in a day; null = no limit. */
   dailyLimit: number | null;
@@ -39,7 +40,7 @@ export const MAX_DAILY_LIMIT = 1_000;
 
 type KeyValue = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-const text = (value: unknown, max: number): string => (typeof value === 'string' ? value.slice(0, max) : '');
+const text = (value: unknown, max: number): string => (typeof value === 'string' ? cut(value, max) : '');
 
 /**
  * Makes settings out of whatever was stored (or imported): unknown fields are dropped,
@@ -52,7 +53,7 @@ export function sanitizeSettings(raw: unknown): Settings {
   for (const mode of MODES) models[mode.id] = text(rawModels[mode.id], MAX_MODEL_CHARS).trim();
   const limit = value.dailyLimit;
   return {
-    provider: typeof value.provider === 'string' && value.provider in AI_PROVIDERS ? (value.provider as AiProviderId) : DEFAULT_SETTINGS.provider,
+    provider: typeof value.provider === 'string' && Object.hasOwn(AI_PROVIDERS, value.provider) ? (value.provider as AiProviderId) : DEFAULT_SETTINGS.provider,
     models,
     systemPrompt: text(value.systemPrompt, MAX_SYSTEM_PROMPT_CHARS),
     childName: text(value.childName, MAX_NAME_CHARS).trim(),

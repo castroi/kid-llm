@@ -5,6 +5,8 @@ import {
   loadApiKey,
   loadSettings,
   MAX_DAILY_LIMIT,
+  MAX_MODEL_CHARS,
+  MAX_NAME_CHARS,
   MAX_SYSTEM_PROMPT_CHARS,
   missingFor,
   sanitizeSettings,
@@ -90,6 +92,32 @@ describe('settings', () => {
     expect(clean).not.toHaveProperty('apiKey');
     expect(sanitizeSettings(null)).toEqual(DEFAULT_SETTINGS);
     expect(sanitizeSettings('text')).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('accept only a provider the app knows, not a name every object happens to have', () => {
+    for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty', '']) {
+      expect(sanitizeSettings({ provider: name }).provider).toBe('venice');
+    }
+    expect(sanitizeSettings(JSON.parse('{"__proto__": {"provider": "x"}, "models": {"__proto__": {"chat": "m"}}}'))).toEqual(DEFAULT_SETTINGS);
+  });
+
+  it('never fail, whatever was stored or imported', () => {
+    for (const junk of [[], [1, 2], 7, true, { models: [] }, { models: 'x' }, { models: { chat: { deep: 1 } } }, { systemPrompt: {} }, { dailyLimit: {} }, { dailyLimit: NaN }]) {
+      expect(sanitizeSettings(junk)).toEqual(DEFAULT_SETTINGS);
+    }
+  });
+
+  it('cut a name and a model name that are too long, without breaking an emoji in half', () => {
+    const clean = sanitizeSettings({ childName: 'נ'.repeat(MAX_NAME_CHARS + 10), models: { chat: 'm'.repeat(MAX_MODEL_CHARS + 10) } });
+    expect(clean.childName).toHaveLength(MAX_NAME_CHARS);
+    expect(clean.models.chat).toHaveLength(MAX_MODEL_CHARS);
+    expect(sanitizeSettings({ childName: `${'נ'.repeat(MAX_NAME_CHARS - 1)}😀` }).childName).toBe('נ'.repeat(MAX_NAME_CHARS - 1));
+  });
+
+  it('are stored without anything that is not a setting, such as a key pasted into the wrong place', () => {
+    const storage = memory();
+    saveSettings({ ...SET_UP, apiKey: 'sk-secret' } as Settings, storage);
+    expect(storage.entries.get(SETTINGS_KEY)).not.toContain('sk-secret');
   });
 
   it('accept a daily limit only as a whole number of at least 1, capped', () => {
