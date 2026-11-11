@@ -50,13 +50,19 @@ export const OPEN_TIMEOUT_MS = 5_000;
 function openDb(factory: IDBFactory, timeoutMs: number): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const open = factory.open(DB_NAME, DB_VERSION);
-    const timer = setTimeout(() => reject(new DOMException('Opening the storage took too long', 'TimeoutError')), timeoutMs);
+    // Once given up on, a connection that still arrives is closed, not left open with nobody holding it.
+    let gaveUp = false;
+    const timer = setTimeout(() => {
+      gaveUp = true;
+      reject(new DOMException('Opening the storage took too long', 'TimeoutError'));
+    }, timeoutMs);
     open.onupgradeneeded = () => {
       open.result.createObjectStore(CHATS, { keyPath: 'id' });
     };
     // Another open tab holds an older version; it has to close first.
     open.onblocked = () => {
       clearTimeout(timer);
+      gaveUp = true;
       reject(new DOMException('The storage is in use by another tab', 'InvalidStateError'));
     };
     open.onerror = () => {
@@ -66,6 +72,10 @@ function openDb(factory: IDBFactory, timeoutMs: number): Promise<IDBDatabase> {
     open.onsuccess = () => {
       clearTimeout(timer);
       const db = open.result;
+      if (gaveUp) {
+        db.close();
+        return;
+      }
       // A newer version of the app wants to upgrade: step aside instead of blocking it.
       db.onversionchange = () => db.close();
       resolve(db);

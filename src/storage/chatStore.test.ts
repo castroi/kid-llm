@@ -131,6 +131,19 @@ describe('chat store', () => {
 
     const silent = { open: () => ({}) } as unknown as IDBFactory;
     await expect(openChatStore(silent, 20)).rejects.toThrow('took too long');
+
+    // A connection that arrives after the app gave up is closed, not left open.
+    let closed = false;
+    let late: IDBOpenDBRequest | undefined;
+    const slow = {
+      open: () => {
+        late = { result: { close: () => void (closed = true) } } as unknown as IDBOpenDBRequest;
+        return late;
+      },
+    } as unknown as IDBFactory;
+    await expect(openChatStore(slow, 20)).rejects.toThrow('took too long');
+    late!.onsuccess?.(new Event('success'));
+    expect(closed).toBe(true);
   });
 });
 

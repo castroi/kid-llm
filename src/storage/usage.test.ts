@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { countMessage, sentToday, USAGE_KEY } from './usage';
+import { countMessage, resetUsage, sentToday, USAGE_KEY } from './usage';
 
 function memory(initial: Record<string, string> = {}) {
   const entries = new Map(Object.entries(initial));
@@ -33,10 +33,36 @@ describe('daily usage', () => {
     const storage = memory();
     countMessage(at(11, 18), storage);
     countMessage(at(11, 19), storage);
-    // The clock now says yesterday, or last week.
-    expect(sentToday(at(10, 12), storage)).toBe(2);
-    countMessage(at(4, 12), storage);
+    // The clock now says earlier today, or late yesterday.
+    expect(sentToday(at(11, 6), storage)).toBe(2);
+    expect(sentToday(at(10, 22), storage)).toBe(2);
+    countMessage(at(10, 22), storage);
     expect(sentToday(at(11, 20), storage)).toBe(3);
+  });
+
+  it('does not lock her out after a wrong far-future date is corrected', () => {
+    const storage = memory();
+    // Counted while the phone's date was set to next year by mistake.
+    countMessage(new Date(2027, 10, 11, 9).getTime(), storage);
+    expect(sentToday(at(11, 9), storage)).toBe(0);
+    countMessage(at(11, 9), storage);
+    expect(sentToday(at(11, 10), storage)).toBe(1);
+  });
+
+  it('can be started again from zero by a parent', () => {
+    const storage = memory();
+    countMessage(at(11, 9), storage);
+    countMessage(at(11, 10), storage);
+    expect(resetUsage(at(11, 11), storage)).toBe(true);
+    expect(sentToday(at(11, 12), storage)).toBe(0);
+    expect(
+      resetUsage(at(11, 11), {
+        getItem: () => null,
+        setItem: () => {
+          throw new Error('full');
+        },
+      }),
+    ).toBe(false);
   });
 
   it('holds only the day and a number: no message text', () => {
@@ -46,7 +72,7 @@ describe('daily usage', () => {
   });
 
   it('treats a record it cannot read as no record', () => {
-    for (const stored of ['{not json', 'null', '7', '{"day":5,"count":1,"lastSeen":1}', '{"day":"2026-11-11","count":"many","lastSeen":1}', '{"day":"2026-11-11","count":1}']) {
+    for (const stored of ['{not json', 'null', '7', '{"day":5,"count":1,"lastSeen":1}', '{"day":"2026-11-11","count":"many","lastSeen":1}', '{"day":"2026-11-11","count":1}', '{"day":"2026-11-11","count":1,"lastSeen":1e300}']) {
       expect(sentToday(at(11, 9), memory({ [USAGE_KEY]: stored }))).toBe(0);
     }
   });

@@ -100,7 +100,10 @@ describe('toProviderMessages', () => {
 
 describe('toProviderMessages with records it cannot trust', () => {
   it('always ends with her message, and is empty when there is nothing of hers to answer', () => {
-    expect(toProviderMessages([message('user', 'א'), message('assistant', 'ב')]).map((m) => m.role)).toEqual(['user']);
+    expect(toProviderMessages([message('user', 'א'), message('assistant', 'ב'), message('user', 'ג')]).at(-1)).toEqual({ role: 'user', content: 'ג' });
+    // Already answered: sending it again would be a second paid call for the same question.
+    expect(toProviderMessages([message('user', 'א'), message('assistant', 'ב')])).toEqual([]);
+    expect(toProviderMessages([message('user', 'א'), message('assistant', 'ב'), message('user', '   ')])).toEqual([]);
     expect(toProviderMessages([message('assistant', 'ב')])).toEqual([]);
     expect(toProviderMessages([message('user', '   ')])).toEqual([]);
     expect(toProviderMessages([])).toEqual([]);
