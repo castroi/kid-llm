@@ -41,3 +41,47 @@ const MODE_PATHS: Record<ModeId, ReactNode> = {
 export function ModeIcon({ mode, size }: { mode: ModeId; size?: number }) {
   return <Icon size={size}>{MODE_PATHS[mode]}</Icon>;
 }
+
+export const PlusIcon = () => (
+  <Icon>
+    <path d="M12 5v14M5 12h14" />
+  </Icon>
+);
+
+/** Up, not sideways: the same in Hebrew and English, so it needs no mirroring. */
+export const SendIcon = () => (
+  <Icon>
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  </Icon>
+);
+
+export const StopIcon = () => (
+  <Icon>
+    <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" />
+  </Icon>
+);
+
+export const CopyIcon = () => (
+  <Icon size={18}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15V6a2 2 0 0 1 2-2h9" />
+  </Icon>
+);
+
+export const RetryIcon = () => (
+  <Icon size={18}>
+    <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" />
+  </Icon>
+);
+
+export const ChevronDownIcon = () => (
+  <Icon size={18}>
+    <path d="M6 9l6 6 6-6" />
+  </Icon>
+);
+
+export const CheckIcon = () => (
+  <Icon size={18}>
+    <path d="M5 12l5 5 9-10" />
+  </Icon>
+);
