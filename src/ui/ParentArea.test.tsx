@@ -310,7 +310,7 @@ describe('the settings', () => {
     expect(screen.getByLabelText('מודל למצב "חיפוש"')).toBeInTheDocument();
     expect(screen.getByText(/במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש/)).toBeInTheDocument();
     expect(screen.getByLabelText('מודל למצב "ציור"')).toBeInTheDocument();
-    expect(screen.getByText(/במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים/)).toBeInTheDocument();
+    expect(screen.getByText(/במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים\. האפליקציה שומרת את התמונות רק באייפון הזה; בלחיצה ארוכה על תמונה היא יכולה לשמור או לשתף אותה בעצמה/)).toBeInTheDocument();
   });
 
   it('means no limit when the daily limit is left empty, and refuses a limit of zero', async () => {

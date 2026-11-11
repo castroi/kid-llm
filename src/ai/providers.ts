@@ -79,8 +79,8 @@ export interface GeneratedImage {
 export const IMAGE_TYPES = ['image/webp', 'image/png', 'image/jpeg'] as const;
 export type ImageType = (typeof IMAGE_TYPES)[number];
 
-/** Far above a real picture (a 1024 px WebP is well under 1 MB); more than this is not downloaded. */
-export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+/** Well above a real picture (a 1024 px WebP is under 1 MB); more than this is not downloaded or kept. */
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
 
 export interface ImageCall {
   model: string;
@@ -295,11 +295,15 @@ const venice: ProviderAdapter = {
     const response = await call(fetch, AI_PROVIDERS.venice.endpoints.image, init);
     if (!response.ok) throw await failure(response, apiKey);
     // With safe mode on, an adult picture comes back blurred, and one against the provider's
-    // terms comes back flagged. Neither is shown to her. The headers are readable only if
-    // Venice exposes them to web pages (CORS); to be checked once on her iPhone.
-    if (response.headers.get('x-venice-is-blurred') === 'true' || response.headers.get('x-venice-is-content-violation') === 'true') {
+    // terms comes back flagged; Venice says which in two headers. A picture is shown only
+    // when both say "false". A header that is missing counts as a refusal too: a web page
+    // can read these headers only if Venice exposes them (CORS), and a picture nobody could
+    // check is not shown to her.
+    const checkedFine = response.headers.get('x-venice-is-blurred') === 'false' && response.headers.get('x-venice-is-content-violation') === 'false';
+    if (!checkedFine) {
+      const unreadable = response.headers.get('x-venice-is-blurred') === null || response.headers.get('x-venice-is-content-violation') === null;
       await response.body?.cancel().catch(() => undefined);
-      throw new AiError('refused');
+      throw new AiError('refused', unreadable ? 'the picture safety headers could not be read' : '');
     }
     const type = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
     if (!(IMAGE_TYPES as readonly string[]).includes(type)) {

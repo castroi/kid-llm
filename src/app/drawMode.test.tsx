@@ -120,6 +120,35 @@ describe('drawing mode', () => {
     expect(document.body.textContent).not.toContain('provider text');
   });
 
+  it("releases a picture's address when it leaves the screen", async () => {
+    openApp();
+    await pickDraw();
+    await ask('פרח');
+    const picture = await screen.findByRole('img', { name: 'התמונה שציירתי' });
+    const address = picture.getAttribute('src');
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(address);
+    await userEvent.click(screen.getByRole('button', { name: 'שיחה חדשה' }));
+    expect(screen.queryByRole('img')).not.toBeInTheDocument();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith(address);
+  });
+
+  it('counts a request she stopped once, and the same request sent again once more', async () => {
+    let calls = 0;
+    const { pictures, sentNow } = openApp({ draw: (request) => (++calls === 1 ? hangs(request) : Promise.resolve(PICTURE)) });
+    await pickDraw();
+    await ask('פרח');
+    await screen.findByText('מציירת...');
+    await userEvent.click(screen.getByRole('button', { name: 'עצירה' }));
+    await waitFor(() => expect(screen.queryByText('מציירת...')).not.toBeInTheDocument());
+    expect(sentNow()).toBe(1);
+    // After a stop there is no free "try again": she has to send the request again, and it counts.
+    expect(screen.queryByRole('button', { name: 'נסי שוב' })).not.toBeInTheDocument();
+    await ask('פרח');
+    await screen.findByRole('img');
+    expect(pictures).toHaveLength(2);
+    expect(sentNow()).toBe(2);
+  });
+
   it('keeps the picture with the chat on the phone', async () => {
     const store = memoryStore();
     openApp({ store });

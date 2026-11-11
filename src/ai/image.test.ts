@@ -8,6 +8,9 @@ import { generateImage, type ImageRequest } from './send';
 const KEY = 'sk-test-secret';
 const PICTURE = new Uint8Array([82, 73, 70, 70, 1, 2, 3, 4]);
 
+/** What Venice sends with a picture it found nothing wrong with. */
+const CHECKED_FINE = { 'x-venice-is-blurred': 'false', 'x-venice-is-content-violation': 'false' };
+
 interface Recorded {
   url: string;
   init: RequestInit;
@@ -20,7 +23,8 @@ function fetchPicture(options: { status?: number; type?: string; headers?: Recor
     fetch: (url, init) => {
       calls.push({ url, init });
       const body = options.body === undefined ? PICTURE : options.body;
-      return Promise.resolve(new Response(body, { status: options.status ?? 200, headers: { 'Content-Type': options.type ?? 'image/webp', ...options.headers } }));
+      const headers = { 'Content-Type': options.type ?? 'image/webp', ...(options.headers ?? CHECKED_FINE) };
+      return Promise.resolve(new Response(body, { status: options.status ?? 200, headers }));
     },
   };
 }
@@ -65,13 +69,29 @@ describe('generateImage', () => {
   });
 
   it.each(['x-venice-is-blurred', 'x-venice-is-content-violation'])('never hands over a picture the provider marked with %s', async (header) => {
-    const { fetch } = fetchPicture({ headers: { [header]: 'true' } });
+    const { fetch } = fetchPicture({ headers: { ...CHECKED_FINE, [header]: 'true' } });
     expect((await reasonOf(generateImage(request(fetch)))).reason).toBe('refused');
   });
 
-  it('takes a picture whose marks say it is fine', async () => {
-    const { fetch } = fetchPicture({ headers: { 'x-venice-is-blurred': 'false', 'x-venice-is-content-violation': 'false' } });
+  it('takes a picture only when both marks say it is fine', async () => {
+    const { fetch } = fetchPicture({ headers: CHECKED_FINE });
     await expect(generateImage(request(fetch))).resolves.toMatchObject({ type: 'image/webp' });
+  });
+
+  it.each([
+    ['both marks are missing (the page cannot read them)', {}],
+    ['the blur mark is missing', { 'x-venice-is-content-violation': 'false' }],
+    ['the violation mark is missing', { 'x-venice-is-blurred': 'false' }],
+    ['a mark has a value it does not know', { 'x-venice-is-blurred': 'maybe', 'x-venice-is-content-violation': 'false' }],
+  ])('never hands over a picture nobody could check: %s', async (_name, headers) => {
+    const { fetch } = fetchPicture({ headers });
+    const err = await reasonOf(generateImage(request(fetch)));
+    expect(err.reason).toBe('refused');
+  });
+
+  it('says for the parent when the marks could not be read at all', async () => {
+    const { fetch } = fetchPicture({ headers: {} });
+    expect((await reasonOf(generateImage(request(fetch)))).detail).toBe('the picture safety headers could not be read');
   });
 
   it.each([

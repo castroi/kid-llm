@@ -112,7 +112,21 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
   return {
     all,
     async list() {
-      return (await all()).map(summary).sort((a, b) => b.updatedAt - a.updatedAt);
+      // One record at a time, keeping only its summary: the pictures inside the chats are
+      // never all in memory together just to show the list.
+      const summaries: ChatSummary[] = [];
+      const tx = db.transaction(CHATS, 'readonly');
+      const done = finished(tx);
+      const walk = tx.objectStore(CHATS).openCursor();
+      walk.onsuccess = () => {
+        const cursor = walk.result;
+        if (!cursor) return;
+        const chat = sanitizeChat(cursor.value);
+        if (chat) summaries.push(summary(chat));
+        cursor.continue();
+      };
+      await done;
+      return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
     },
     async get(id) {
       return sanitizeChat(await read<unknown>((store) => store.get(id))) ?? undefined;
