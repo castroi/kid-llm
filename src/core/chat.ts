@@ -83,11 +83,13 @@ export const MAX_CONTEXT_CHARS = 24_000;
  */
 export function toProviderMessages(messages: readonly StoredMessage[], maxChars: number = MAX_CONTEXT_CHARS): ChatMessage[] {
   const known = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string');
-  // Only a conversation that ends with a message of hers has something to answer; an
-  // earlier question that already got its answer is never sent again on its own.
-  const newest = known[known.length - 1];
+  // An answer that failed or has no text yet is no answer: the question before it still waits.
+  const real = known.filter((m) => m.role === 'user' || (m.text.trim() !== '' && m.state !== 'failed'));
+  // Only a conversation that ends with a message of hers has something to answer; a
+  // question that already got its answer (also one she stopped) is never sent again on its own.
+  const newest = real[real.length - 1];
   if (!newest || newest.role !== 'user' || newest.text.trim() === '') return [];
-  const usable = known.filter((m) => m.text.trim() !== '' && m.state !== 'failed');
+  const usable = real.filter((m) => m.text.trim() !== '');
 
   const kept: ChatMessage[] = [];
   let used = 0;
