@@ -11,16 +11,40 @@ export interface Inline {
 
 export type Block = { kind: 'code'; text: string } | { kind: 'line'; parts: Inline[]; heading: boolean };
 
-/** A number, a number with a letter ("2x"), or a single letter standing for one ("x"). */
-const NUMBER = String.raw`[-+]?(?:[\d(][\d.,()]*[a-zA-Z]?|[a-zA-Z](?![a-zA-Z]))`;
+/**
+ * A number, a number with a letter ("2x"), or a single letter standing for one ("x").
+ * The repeats are bounded (no real number is longer): an unbounded one makes a long run
+ * of digits cost time that grows with its square.
+ */
+const NUMBER = String.raw`[-+]?(?:[\d(][\d.,()]{0,30}[a-zA-Z]?|[a-zA-Z](?![a-zA-Z]))`;
 /** "3/4 + 1/8 = 7/8", "7 ÷ 8 = 0.875", "11/11/2026". */
 const EXPRESSION = String.raw`${NUMBER}(?:\s*[-+*/÷×=<>^]\s*${NUMBER})+%?`;
 /** "-5", "+3", "50%", "12 km", "30°", "23 °F". */
-const SIGNED_OR_UNIT = String.raw`[-+]\d[\d.,]*%?|\d[\d.,]*\s?(?:%|°[a-zA-Z]?|[a-zA-Z]+\b)`;
+const SIGNED_OR_UNIT = String.raw`[-+]\d[\d.,]{0,30}%?|\d[\d.,]{0,30}\s?(?:%|°[a-zA-Z]?|[a-zA-Z]{1,12}\b)`;
 const INLINE = new RegExp(String.raw`\x60([^\x60\n]+)\x60|\*\*([^*\n]+)\*\*|(https?:\/\/\S+)|(${EXPRESSION}|${SIGNED_OR_UNIT})`, 'g');
+
+/**
+ * A line longer than this is shown as plain text: a second guard on the time the patterns
+ * above can take, whatever a model sends.
+ */
+export const MAX_INLINE_CHARS = 2_000;
+
+/** An answer is parsed again with every piece that arrives; lines already seen cost nothing. */
+const seen = new Map<string, Inline[]>();
+const MAX_SEEN = 2_000;
 
 /** One line's text, split into plain text, bold, code and left-to-right runs. */
 export function parseInline(line: string): Inline[] {
+  if (line.length > MAX_INLINE_CHARS) return [{ kind: 'text', text: line }];
+  const known = seen.get(line);
+  if (known) return known;
+  const parts = splitInline(line);
+  if (seen.size >= MAX_SEEN) seen.clear();
+  seen.set(line, parts);
+  return parts;
+}
+
+function splitInline(line: string): Inline[] {
   const parts: Inline[] = [];
   const push = (kind: Inline['kind'], text: string) => {
     if (!text) return;
@@ -41,20 +65,28 @@ export function parseInline(line: string): Inline[] {
     else {
       // A sentence's own full stop or comma stays with the sentence, not with the number or link.
       const run = link ?? maths;
-      const end = run.replace(/[.,]+$/, '');
-      push('ltr', end);
-      push('text', run.slice(end.length));
+      let end = run.length;
+      while (end > 0 && (run[end - 1] === '.' || run[end - 1] === ',')) end--;
+      push('ltr', run.slice(0, end));
+      push('text', run.slice(end));
     }
   }
   push('text', line.slice(from));
   return parts;
 }
 
+/**
+ * Characters nobody sees that change the order text is shown in, or hide inside it:
+ * direction overrides and marks, zero-width characters. A model could use them to make
+ * a line read differently from what it says; they are removed before anything is shown or copied.
+ */
+const HIDDEN = /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+
 /** The whole answer as blocks: code blocks (between ``` lines) and lines of text. */
 export function parseAnswer(text: string): Block[] {
   const blocks: Block[] = [];
   let code: string[] | null = null;
-  for (const raw of text.split('\n')) {
+  for (const raw of text.replace(HIDDEN, '').split('\n')) {
     if (raw.trim().startsWith('```')) {
       if (code) {
         blocks.push({ kind: 'code', text: code.join('\n') });

@@ -17,7 +17,8 @@ export interface Services {
   sendChat: (request: ChatRequest) => Promise<ChatResult>;
   /** How many messages she has sent today, and counting one more (src/storage/usage.ts). */
   sentToday: () => number;
-  countMessage: () => void;
+  /** False when the phone refused to write the count. */
+  countMessage: () => boolean;
   now: () => number;
   newId: () => string;
   copyText: (text: string) => Promise<void>;
@@ -31,7 +32,7 @@ export interface ChatController {
   /** An answer is being written right now. */
   writing: boolean;
   notice: Notice;
-  /** The last save to the phone failed. */
+  /** The chat on the screen is not on the phone: the last save failed, or the browser has no storage. */
   notSaved: boolean;
   setMode: (mode: ModeId) => void;
   /** Sends her message. False when nothing was sent (empty, not set up, over the limit, or an answer is being written). */
@@ -48,7 +49,9 @@ export function useChat(services: Services): ChatController {
   const [mode, setModeState] = useState<ModeId>(DEFAULT_MODE);
   const [writing, setWriting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
-  const [notSaved, setNotSaved] = useState(false);
+  const [notSaved, setNotSaved] = useState(services.store === null);
+  // Messages the phone refused to count; the limit still holds until the app is closed.
+  const uncounted = useRef(0);
 
   // What the screen shows now, for the steps that run while an answer is being written.
   const shown = useRef(chat);
@@ -68,9 +71,12 @@ export function useChat(services: Services): ChatController {
   const keep = useCallback(
     (toSave: Chat, created: boolean) => {
       if (!services.store) return;
-      const saving: Promise<unknown> = created ? services.store.save(toSave) : services.store.update(toSave);
+      const saving: Promise<boolean> = created ? services.store.save(toSave).then(() => true) : services.store.update(toSave);
       saving.then(
-        () => setNotSaved(false),
+        // "Saved" only after a write that really happened; update() writes nothing when the chat is gone.
+        (written) => {
+          if (written) setNotSaved(false);
+        },
         () => setNotSaved(true),
       );
     },
@@ -79,7 +85,7 @@ export function useChat(services: Services): ChatController {
 
   /** Asks the provider for the answer to `base` (which ends with her message) and writes it as it arrives. */
   const answer = useCallback(
-    async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string) => {
+    async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[] = []) => {
       const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode };
       let current = withMessage(base, reply);
       let text = '';
@@ -89,7 +95,8 @@ export function useChat(services: Services): ChatController {
         if (shown.current.id === next.id) show(next);
       };
       const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, state ? { ...reply, text, state } : { ...reply, text }));
-      const drop = () => put({ ...current, messages: current.messages.filter((m) => m.id !== reply.id) });
+      // Nothing new was written: the empty answer goes, and an answer this call was meant to replace comes back.
+      const drop = () => put({ ...current, messages: [...base.messages, ...replaced] });
 
       const controller = new AbortController();
       stopper.current = controller;
@@ -134,6 +141,20 @@ export function useChat(services: Services): ChatController {
     [services, show, keep],
   );
 
+  /** True (with the kind notice) when she has used up the day. */
+  const overLimit = useCallback(
+    (settings: Settings): boolean => {
+      if (settings.dailyLimit === null || services.sentToday() + uncounted.current < settings.dailyLimit) return false;
+      setNotice({ kind: 'limit' });
+      return true;
+    },
+    [services],
+  );
+
+  const count = useCallback(() => {
+    if (!services.countMessage()) uncounted.current += 1;
+  }, [services]);
+
   const send = useCallback(
     (text: string): boolean => {
       const mine = text.trim();
@@ -142,18 +163,15 @@ export function useChat(services: Services): ChatController {
       const apiKey = services.loadApiKey(settings.provider);
       if (missingFor(mode, settings, apiKey)) return false;
 
-      if (settings.dailyLimit !== null && services.sentToday() >= settings.dailyLimit) {
-        setNotice({ kind: 'limit' });
-        return false;
-      }
+      if (overLimit(settings)) return false;
       const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode });
-      services.countMessage();
+      count();
       show(base);
       keep(base, true);
       void answer(base, mode, settings, apiKey);
       return true;
     },
-    [services, mode, show, keep, answer],
+    [services, mode, show, keep, answer, overLimit, count],
   );
 
   const stop = useCallback(() => stopper.current?.abort(), []);
@@ -167,11 +185,19 @@ export function useChat(services: Services): ChatController {
     const settings = services.loadSettings();
     const apiKey = services.loadApiKey(settings.provider);
     if (missingFor(mode, settings, apiKey)) return;
-    // The answers after her last message are replaced by the new one.
+    // The answers after her last message are replaced by the new one, once it starts to arrive.
     const base = { ...shown.current, messages: messages.slice(0, last + 1) };
+    const replaced = messages.slice(last + 1);
     if (toProviderMessages(base.messages).length === 0) return;
-    void answer(base, mode, settings, apiKey);
-  }, [services, mode, answer]);
+    // Trying again after a failure is free. Asking for another answer when one arrived is
+    // a paid call like any message, so it counts toward the day and stops at the limit.
+    const hadAnswer = replaced.some((m) => m.text.trim() !== '' && m.state !== 'failed');
+    if (hadAnswer) {
+      if (overLimit(settings)) return;
+      count();
+    }
+    void answer(base, mode, settings, apiKey, replaced);
+  }, [services, mode, answer, overLimit, count]);
 
   const startNewChat = useCallback(() => {
     stopper.current?.abort();

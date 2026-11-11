@@ -63,6 +63,8 @@ interface Options {
   send?: Send;
   store?: ChatStore | null;
   sentToday?: number;
+  /** The phone refuses to write the daily count. */
+  countFails?: boolean;
 }
 
 function open(options: Options = {}) {
@@ -81,7 +83,11 @@ function open(options: Options = {}) {
       return send(request);
     },
     sentToday: () => sent,
-    countMessage: () => void (sent += 1),
+    countMessage: () => {
+      if (options.countFails) return false;
+      sent += 1;
+      return true;
+    },
     now: () => 1_700_000_000_000 + id,
     newId: () => `id-${++id}`,
     copyText,
@@ -193,6 +199,34 @@ describe('chatting', () => {
     await screen.findByText('היי לך!');
     expect(requests[0].model).toBe('model-math');
     expect(screen.getByText(/^חשבון ·/)).toBeInTheDocument();
+  });
+
+  it('keeps the screen behind the mode sheet out of reach, closes on Escape and gives the focus back', async () => {
+    open();
+    const chip = screen.getByRole('button', { name: 'שיחה' });
+    await userEvent.click(chip);
+    const sheet = screen.getByRole('dialog');
+    expect(sheet).toContainElement(document.activeElement as HTMLElement);
+    expect(box().closest('[inert]')).not.toBeNull();
+    expect(sheet.closest('[inert]')).toBeNull();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(box().closest('[inert]')).toBeNull();
+    expect(chip).toHaveFocus();
+  });
+
+  it('starts a chat in the new chat while the old call is still ending', async () => {
+    let calls = 0;
+    const send: Send = (request) => (++calls === 1 ? hangsAfter('ישן')(request) : answers('חדש')(request));
+    const { requests } = open({ send });
+    await say('אחת');
+    await screen.findByText('ישן');
+    await userEvent.click(screen.getByRole('button', { name: 'שיחה חדשה' }));
+    await say('שתיים');
+    expect(await screen.findByText('חדש')).toBeInTheDocument();
+    expect(screen.queryByText('ישן')).not.toBeInTheDocument();
+    expect(requests[1].messages).toEqual([{ role: 'user', content: 'שתיים' }]);
   });
 
   it('closes the mode sheet without changing anything when she taps outside it', async () => {
@@ -321,6 +355,25 @@ describe('when something fails', () => {
     expect(screen.getByText('חצי תשובה')).toBeInTheDocument();
   });
 
+  it('keeps the answer she had when asking for another one fails or is stopped before anything new arrives', async () => {
+    let calls = 0;
+    const send: Send = (request) => (++calls === 1 ? answers('ראשונה')(request) : calls === 2 ? Promise.reject(new AiError('network')) : hangsAfter()(request));
+    const store = fakeStore();
+    open({ send, store });
+    await say('שלום');
+    await screen.findByText('ראשונה');
+
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    expect(await screen.findByText('אין אינטרנט כרגע. ננסה שוב?')).toBeInTheDocument();
+    expect(screen.getByText('ראשונה')).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'עצירה' }));
+    expect(await screen.findByText('ראשונה')).toBeInTheDocument();
+    await waitFor(() => expect(store.updated.length).toBeGreaterThanOrEqual(3));
+    expect(store.updated.at(-1)!.messages.map((m) => m.text)).toEqual(['שלום', 'ראשונה']);
+  });
+
   it('asks again for the last answer with "נסי שוב", replacing it', async () => {
     let calls = 0;
     const send: Send = (request) => answers(++calls === 1 ? 'ראשונה' : 'שנייה')(request);
@@ -351,13 +404,37 @@ describe('the daily limit', () => {
     expect(box().value).toBe('עוד אחת');
   });
 
-  it('does not count asking again for an answer', async () => {
-    const { sentNow } = open({ settings: { dailyLimit: 5 } });
+  it('counts asking for another answer like a message, and refuses it at the limit', async () => {
+    const { requests, sentNow } = open({ settings: { dailyLimit: 2 } });
     await say('שלום');
     await screen.findByText('היי לך!');
     await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
-    await waitFor(() => expect(screen.getAllByText('היי לך!')).toHaveLength(1));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(sentNow()).toBe(2);
+
+    await userEvent.click(await screen.findByRole('button', { name: 'נסי שוב' }));
+    expect(await screen.findByText(LIMIT_MESSAGE)).toBeInTheDocument();
+    expect(requests).toHaveLength(2);
+    expect(screen.getByText('היי לך!')).toBeInTheDocument();
+  });
+
+  it('does not count trying again after a failure', async () => {
+    let calls = 0;
+    const send: Send = (request) => (++calls === 1 ? Promise.reject(new AiError('network')) : answers('הנה!')(request));
+    const { sentNow } = open({ settings: { dailyLimit: 1 }, send });
+    await say('שלום');
+    await userEvent.click(await screen.findByRole('button', { name: 'ננסה שוב' }));
+    expect(await screen.findByText('הנה!')).toBeInTheDocument();
     expect(sentNow()).toBe(1);
+  });
+
+  it('still holds when the phone cannot write the count', async () => {
+    const { requests } = open({ settings: { dailyLimit: 1 }, countFails: true });
+    await say('אחת');
+    await screen.findByText('היי לך!');
+    await say('שתיים');
+    expect(await screen.findByText(LIMIT_MESSAGE)).toBeInTheDocument();
+    expect(requests).toHaveLength(1);
   });
 });
 
@@ -420,10 +497,30 @@ describe('saving on the phone', () => {
     expect(await screen.findByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
   });
 
-  it('still lets her chat when the browser has no storage at all', async () => {
+  it('still lets her chat when the browser has no storage at all, and says that nothing is kept', async () => {
     open({ store: null });
+    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+    expect(screen.queryByText('השיחות נשמרות רק באייפון הזה')).not.toBeInTheDocument();
     await say('שלום');
     expect(await screen.findByText('היי לך!')).toBeInTheDocument();
-    expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
+    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('keeps saying "not saved" when the first save failed and the chat is not on the phone at the end', async () => {
+    const store = fakeStore();
+    store.save = () => Promise.reject(new Error('full'));
+    // Nothing to update: the chat never reached the phone.
+    store.update = async () => false;
+    open({ store });
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    expect(await screen.findByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('says chats are kept on this iPhone when they are', () => {
+    open();
+    expect(screen.getByText('השיחות נשמרות רק באייפון הזה')).toBeInTheDocument();
   });
 });

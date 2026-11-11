@@ -25,4 +25,4 @@ export function kidMessage(reason: AiErrorReason): { text: string; retry: boolea
 
 export const SETUP_MESSAGE = "הצ'אט עוד לא מוכן. צריך שאבא או אמא יגדירו אותו.";
 export const LIMIT_MESSAGE = 'סיימנו להיום! נמשיך לדבר מחר.';
-export const NOT_SAVED_MESSAGE = 'לא הצלחתי לשמור את השיחה באייפון.';
+export const NOT_SAVED_MESSAGE = 'השיחה הזאת לא נשמרת באייפון.';

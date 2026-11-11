@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseAnswer, parseInline, plainText } from './answerText';
+import { MAX_INLINE_CHARS, parseAnswer, parseInline, plainText } from './answerText';
 
 const kinds = (line: string) => parseInline(line).map((part) => `${part.kind}:${part.text}`);
 
@@ -62,6 +62,31 @@ describe('parseAnswer', () => {
   it('is empty for an empty answer', () => {
     expect(parseAnswer('')).toEqual([]);
     expect(parseAnswer('  \n \n')).toEqual([]);
+  });
+});
+
+describe('a hostile or broken answer', () => {
+  it('is parsed quickly however long its runs of digits, brackets or commas are', () => {
+    const started = performance.now();
+    for (const line of ['1'.repeat(200_000), '('.repeat(200_000), '1.'.repeat(100_000), `http://a${','.repeat(200_000)}`, `${'1'.repeat(MAX_INLINE_CHARS - 1)}x`]) {
+      parseAnswer(line);
+    }
+    // Many lines just under the limit, as a long answer re-parsed while it is written.
+    const many = Array.from({ length: 100 }, (_, i) => `${i} ${'9'.repeat(MAX_INLINE_CHARS - 10)}`).join('\n');
+    parseAnswer(many);
+    parseAnswer(`${many}\nעוד שורה`);
+    expect(performance.now() - started).toBeLessThan(3_000);
+  });
+
+  it('shows a line that is too long as plain text', () => {
+    const long = `3 + 5 = 8 ${'א'.repeat(MAX_INLINE_CHARS)}`;
+    expect(parseInline(long)).toEqual([{ kind: 'text', text: long }]);
+  });
+
+  it('removes hidden characters that reverse or hide text, on screen and in what is copied', () => {
+    const tricky = 'בטוח\u202Eלא\u202C \u200Bלגמרי\u2066!\u2069\uFEFF';
+    expect(parseAnswer(tricky)).toEqual([{ kind: 'line', heading: false, parts: [{ kind: 'text', text: 'בטוחלא לגמרי!' }] }]);
+    expect(plainText(tricky)).toBe('בטוחלא לגמרי!');
   });
 });
 

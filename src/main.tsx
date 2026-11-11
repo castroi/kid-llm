@@ -16,7 +16,7 @@ function browserServices(store: ChatStore | null): Services {
     loadApiKey: (provider) => loadApiKey(provider),
     sendChat,
     sentToday: () => sentToday(Date.now()),
-    countMessage: () => void countMessage(Date.now()),
+    countMessage: () => countMessage(Date.now()),
     now: () => Date.now(),
     newId: () => crypto.randomUUID(),
     copyText: (text) => navigator.clipboard.writeText(text),
