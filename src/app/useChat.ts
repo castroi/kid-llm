@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import type { AiProviderId } from '../ai/catalog';
-import { AiError, type AiErrorReason, type ChatResult } from '../ai/providers';
-import type { ChatRequest } from '../ai/send';
+import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
+import type { ChatRequest, ImageRequest } from '../ai/send';
 import { forgetParsed } from '../core/answerText';
 import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
@@ -16,6 +16,8 @@ export interface Services {
   loadSettings: () => Settings;
   loadApiKey: (provider: AiProviderId) => string;
   sendChat: (request: ChatRequest) => Promise<ChatResult>;
+  /** Makes one picture of what she wrote (drawing mode). */
+  generateImage: (request: ImageRequest) => Promise<GeneratedImage>;
   /** How many messages she has sent today, and counting one more (src/storage/usage.ts). */
   sentToday: () => number;
   /** False when the phone refused to write the count. */
@@ -103,12 +105,13 @@ export function useChat(services: Services): ChatController {
       const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode };
       let current = withMessage(base, reply);
       let text = '';
+      let image: GeneratedImage | undefined;
       // If she moved to another chat meanwhile, this one keeps being written in the background only.
       const put = (next: Chat) => {
         current = next;
         if (shown.current.id === next.id) show(next);
       };
-      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, state ? { ...reply, text, state } : { ...reply, text }));
+      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, { ...reply, text, ...(image ? { image } : {}), ...(state ? { state } : {}) }));
       // Nothing new was written: the empty answer goes, and an answer this call was meant to replace comes back.
       const drop = () => put({ ...current, messages: [...base.messages, ...replaced] });
 
@@ -119,23 +122,36 @@ export function useChat(services: Services): ChatController {
       setNotice(null);
       put(current);
       try {
-        await services.sendChat({
-          provider: settings.provider,
-          model: settings.models[forMode],
-          systemPrompt: settings.systemPrompt,
-          // A search call carries only what she wrote in search mode (and its answers): what she
-          // said in other modes of the same chat is not handed to a search engine.
-          messages: toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages),
-          apiKey,
-          webSearch: forMode === 'search',
-          signal: controller.signal,
-          onDelta: (piece) => {
-            // Another answer to the same message counts toward the day only once it really arrives.
-            if (countOnFirstPiece && text === '') count();
-            text += piece;
-            write();
-          },
-        });
+        if (forMode === 'draw') {
+          // A picture is made from her last message alone; nothing else of the chat is sent.
+          image = await services.generateImage({
+            provider: settings.provider,
+            model: settings.models.draw,
+            prompt: base.messages[base.messages.length - 1].text,
+            apiKey,
+            signal: controller.signal,
+          });
+          // Another picture for the same request counts toward the day once it really arrives.
+          if (countOnFirstPiece) count();
+        } else {
+          await services.sendChat({
+            provider: settings.provider,
+            model: settings.models[forMode],
+            systemPrompt: settings.systemPrompt,
+            // A search call carries only what she wrote in search mode (and its answers): what she
+            // said in other modes of the same chat is not handed to a search engine.
+            messages: toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages),
+            apiKey,
+            webSearch: forMode === 'search',
+            signal: controller.signal,
+            onDelta: (piece) => {
+              // Another answer to the same message counts toward the day only once it really arrives.
+              if (countOnFirstPiece && text === '') count();
+              text += piece;
+              write();
+            },
+          });
+        }
         write();
       } catch (err) {
         // Anything unexpected is shown like a broken answer; the provider's own text never reaches her.
@@ -207,10 +223,10 @@ export function useChat(services: Services): ChatController {
     // The answers after her last message are replaced by the new one, once it starts to arrive.
     const base = { ...shown.current, messages: messages.slice(0, last + 1) };
     const replaced = messages.slice(last + 1);
-    if (toProviderMessages(base.messages).length === 0) return;
+    if (forMode !== 'draw' && toProviderMessages(base.messages).length === 0) return;
     // Trying again after a failure is free. Asking for another answer when one arrived is
     // a paid call like any message: it stops at the limit, and counts once the new answer arrives.
-    const hadAnswer = replaced.some((m) => m.text.trim() !== '' && m.state !== 'failed');
+    const hadAnswer = replaced.some((m) => (m.text.trim() !== '' || m.image !== undefined) && m.state !== 'failed');
     if (hadAnswer && overLimit(settings)) return;
     void answer(base, forMode, settings, apiKey, replaced, hadAnswer);
   }, [services, answer, overLimit]);
