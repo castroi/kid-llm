@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { checkConnection, sendChat } from './ai/send';
+import { checkConnection, generateImage, sendChat } from './ai/send';
 import { App } from './app/App';
 import type { ParentServices } from './app/parentServices';
 import type { Services } from './app/useChat';
@@ -17,6 +17,7 @@ function browserServices(store: ChatStore | null): Services {
     loadSettings: () => loadSettings(),
     loadApiKey: (provider) => loadApiKey(provider),
     sendChat,
+    generateImage,
     sentToday: () => sentToday(Date.now()),
     countMessage: () => countMessage(Date.now()),
     now: () => Date.now(),

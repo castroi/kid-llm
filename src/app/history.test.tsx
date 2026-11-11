@@ -50,6 +50,7 @@ function openApp(store: ChatStore | null, send: Send = answersNow) {
     loadSettings: () => ({ provider: 'venice', models: { chat: 'm', search: '', math: 'm', draw: '' }, systemPrompt: '', childName: '', dailyLimit: null }),
     loadApiKey: () => 'sk-test',
     sendChat: send,
+    generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => 0,
     countMessage: () => true,
     now: () => NOW + id,

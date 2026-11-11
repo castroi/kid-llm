@@ -84,6 +84,7 @@ function open(options: Options = {}) {
       requests.push(request);
       return send(request);
     },
+    generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => sent,
     countMessage: () => {
       if (options.countFails) return false;
@@ -111,7 +112,7 @@ describe('opening screen', () => {
     open();
     expect(screen.getByRole('heading', { name: 'היי נועה, על מה נדבר היום?' })).toBeInTheDocument();
     const modes = within(screen.getByRole('group', { name: 'מצב' })).getAllByRole('button');
-    expect(modes.map((m) => m.textContent)).toEqual(['שיחהלדבר על כל דבר', 'חיפושלמצוא תשובות באינטרנט', 'חשבוןעזרה בתרגילים', 'ציורבקרוב']);
+    expect(modes.map((m) => m.textContent)).toEqual(['שיחהלדבר על כל דבר', 'חיפושלמצוא תשובות באינטרנט', 'חשבוןעזרה בתרגילים', 'ציורליצור תמונה']);
     expect(document.body.textContent).not.toContain('model-');
   });
 
@@ -120,14 +121,14 @@ describe('opening screen', () => {
     expect(screen.getByRole('heading', { name: 'היי, על מה נדבר היום?' })).toBeInTheDocument();
   });
 
-  it('starts on plain chat and lets her pick only the modes that work', async () => {
+  it('starts on plain chat and lets her pick any mode', async () => {
     open();
     const group = within(screen.getByRole('group', { name: 'מצב' }));
     expect(group.getByRole('button', { name: /שיחה/ })).toHaveAttribute('aria-pressed', 'true');
     await userEvent.click(group.getByRole('button', { name: /חשבון/ }));
     expect(group.getByRole('button', { name: /חשבון/ })).toHaveAttribute('aria-pressed', 'true');
     expect(group.getByRole('button', { name: /חיפוש/ })).toBeEnabled();
-    expect(group.getByRole('button', { name: /ציור/ })).toBeDisabled();
+    expect(group.getByRole('button', { name: /ציור/ })).toBeEnabled();
   });
 
   it('tells her to call a parent, and sends nothing, until a parent has set the chat up', async () => {
@@ -194,7 +195,6 @@ describe('chatting', () => {
     const { requests } = open();
     await userEvent.click(screen.getByRole('button', { name: 'שיחה' }));
     const sheet = within(screen.getByRole('dialog', { name: 'במה להשתמש עכשיו?' }));
-    expect(sheet.getByRole('button', { name: /ציור/ })).toBeDisabled();
     await userEvent.click(sheet.getByRole('button', { name: /חשבון/ }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     await say('כמה זה 2+2?');

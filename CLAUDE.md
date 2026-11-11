@@ -25,7 +25,7 @@ A private AI chat for one 10-year-old on her iPhone, in Hebrew. Static PWA on Ve
 | The kid never sees provider messages or error codes; the parent area does | "משהו לא עובד" is enough for her |
 | Parent area behind a PIN: provider, key, model per mode, system prompt, limits, backup, delete all | She can't change what keeps her safe |
 | Image requests always go with the provider's safe mode on | It's a kid's app |
-| Search mode asks the provider to search the web (`enable_web_search: on`); no other mode does. The parent area says that her question then also reaches a search engine | She gets what she picked, and the parent knows what leaves the phone |
+| Search mode asks the provider to search the web (`enable_web_search: on`); no other mode does. A search call carries only what she wrote in search mode, and the search lines of `src/ai/baseline.ts`. "Try again" asks in the mode her message was written in. The parent area says that what she writes in search mode also reaches a search engine | She gets what she picked, what she said elsewhere stays out of a search engine, and the parent knows what leaves the phone |
 | Every chat call starts with the built-in instructions in `src/ai/baseline.ts`; the parent's system prompt is added after them, never instead | Her messages never reach a model with no instructions |
 | An `AiError`'s `detail` is for the parent area's screen only: never stored, backed up or logged | A provider may quote part of her message in it |
 | Provider calls go through one module that applies the timeout, redacts the key from errors and maps failures to reasons | One place enforces privacy and limits; a new provider only describes its request and response |

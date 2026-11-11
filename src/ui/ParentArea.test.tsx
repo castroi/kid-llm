@@ -304,12 +304,13 @@ describe('the settings', () => {
     });
   });
 
-  it('offers a model only for the modes that work today', async () => {
+  it('offers a model for every mode, and says what each one sends', async () => {
     await openSettings();
     expect(screen.getByLabelText('מודל למצב "חשבון"')).toBeInTheDocument();
     expect(screen.getByLabelText('מודל למצב "חיפוש"')).toBeInTheDocument();
-    expect(screen.getByText(/במצב "חיפוש" השאלה שלה נשלחת, דרך הספק, גם למנוע חיפוש/)).toBeInTheDocument();
-    expect(screen.queryByLabelText('מודל למצב "ציור"')).not.toBeInTheDocument();
+    expect(screen.getByText(/במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש/)).toBeInTheDocument();
+    expect(screen.getByLabelText('מודל למצב "ציור"')).toBeInTheDocument();
+    expect(screen.getByText(/במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים/)).toBeInTheDocument();
   });
 
   it('means no limit when the daily limit is left empty, and refuses a limit of zero', async () => {

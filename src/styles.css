@@ -467,6 +467,27 @@ button:disabled {
   border-radius: 14px;
 }
 
+.picture {
+  display: block;
+  width: min(100%, 320px);
+  height: auto;
+  border-radius: 20px;
+  background: var(--accent-tint);
+  /* Long-press saves it; the callout is Safari's own. */
+  -webkit-touch-callout: default;
+}
+
+.drawing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 320px);
+  min-height: 120px;
+  margin: 0;
+  border-radius: 20px;
+  background: var(--accent-tint);
+}
+
 /* Parent area */
 .parent {
   display: flex;

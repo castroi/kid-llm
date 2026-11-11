@@ -90,7 +90,7 @@ export interface ChatRequest {
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
   apiKey: string;
-  /** Search mode: look the question up on the web first. Her question then also reaches a search engine, through the provider. */
+  /** Search mode: look the question up on the web first. What is sent in `messages` then also reaches a search engine, through the provider. */
   webSearch?: boolean;
   /** Called with each piece of the answer as it arrives, so she sees it being written. */
   onDelta: (text: string) => void;
@@ -111,7 +111,7 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
-      systemPrompt: systemPromptFor(req.systemPrompt),
+      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true),
       messages: req.messages,
       apiKey,
       webSearch: req.webSearch === true,
