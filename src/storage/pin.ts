@@ -18,6 +18,8 @@ export const PIN_PATTERN = /^\d{4,8}$/;
 export const MAX_TRIES = 5;
 export const FIRST_LOCK_MS = 60_000;
 export const MAX_LOCK_MS = 60 * 60_000;
+/** The longest a later check waits for the one before it. */
+export const MAX_CHECK_MS = 10_000;
 const ITERATIONS = 150_000;
 const MAX_ITERATIONS = 5_000_000;
 
@@ -118,7 +120,18 @@ let lastCheck: Promise<unknown> = Promise.resolve();
 /** Checks a code. A wrong try is counted; `locked` means no check was made at all. */
 export function checkPin(pin: string, now: number, storage: KeyValue = localStorage, hasher: Hasher = crypto): Promise<PinResult> {
   const mine = lastCheck.then(() => checkOne(pin, now, storage, hasher));
-  lastCheck = mine.catch(() => undefined);
+  // The next check waits for this one, but not for ever: a hashing call that never ends
+  // must not keep the parent out until the app is restarted.
+  const settled = mine.then(
+    () => undefined,
+    () => undefined,
+  );
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const limit = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, MAX_CHECK_MS);
+  });
+  void settled.then(() => clearTimeout(timer));
+  lastCheck = Promise.race([settled, limit]);
   return mine;
 }
 
