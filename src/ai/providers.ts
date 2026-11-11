@@ -7,6 +7,7 @@ import { LineTooLongError, sseData } from './sse';
  * shared in src/ai/send.ts, so a new provider only describes its own request and response.
  * Adapted from kid-closet's src/ai/providers.ts.
  * Docs: Venice https://docs.venice.ai/api-reference/endpoint/chat/completions
+ *       and https://docs.venice.ai/api-reference/endpoint/image/generate
  */
 
 /** Why a call failed. The kid sees one friendly line; the parent area shows the reason. */
@@ -16,7 +17,7 @@ export type AiErrorReason =
   | 'rate-limited' // 429
   | 'bad-request' // 400/404/413/415: model name or request the provider doesn't accept
   | 'provider-down' // 5xx, or an error sent in the middle of an answer
-  | 'refused' // the provider's content filter
+  | 'refused' // the provider's content filter (also 422, and a picture it blurred or flagged)
   | 'network' // no answer, or the connection dropped: offline, or blocked for web pages (CORS)
   | 'timeout'
   | 'cancelled' // she pressed "עצירה"
@@ -69,8 +70,31 @@ export interface ChatResult {
   finishReason: string | null;
 }
 
+/** A picture as it came from the provider and as it is kept on the phone. */
+export interface GeneratedImage {
+  type: ImageType;
+  bytes: ArrayBuffer;
+}
+
+export const IMAGE_TYPES = ['image/webp', 'image/png', 'image/jpeg'] as const;
+export type ImageType = (typeof IMAGE_TYPES)[number];
+
+/** Far above a real picture (a 1024 px WebP is well under 1 MB); more than this is not downloaded. */
+export const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+
+export interface ImageCall {
+  model: string;
+  /** What she asked for, with the child-safety line added (src/ai/baseline.ts). */
+  prompt: string;
+  apiKey: string;
+  signal: AbortSignal;
+  fetch: FetchLike;
+}
+
 export interface ProviderAdapter {
   streamChat(call: ChatCall): Promise<ChatResult>;
+  /** Makes one picture. A picture the provider blurred or flagged is a refusal, never shown. */
+  generateImage(call: ImageCall): Promise<GeneratedImage>;
   /** Resolves when the key works; the text, if any, is shown to the parent. */
   checkKey(call: { apiKey: string; signal: AbortSignal; fetch: FetchLike }): Promise<string | null>;
 }
@@ -87,6 +111,8 @@ function reasonForStatus(status: number): AiErrorReason {
   if (status === 401 || status === 403) return 'unauthorized';
   if (status === 402) return 'no-credit';
   if (status === 429) return 'rate-limited';
+  // 422: the provider's content policy refused the request.
+  if (status === 422) return 'refused';
   if (status >= 500) return 'provider-down';
   return 'bad-request';
 }
@@ -119,6 +145,32 @@ async function readLimitedText(response: Response, max: number): Promise<string>
     await reader.cancel().catch(() => undefined);
   }
   return text;
+}
+
+/** Reads a response's bytes, and gives up with `bad-response` past `max`. */
+async function readLimitedBytes(response: Response, max: number): Promise<ArrayBuffer> {
+  if (!response.body) return new ArrayBuffer(0);
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) throw new AiError('bad-response', 'picture too large');
+      parts.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const whole = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    whole.set(part, at);
+    at += part.byteLength;
+  }
+  return whole.buffer;
 }
 
 /** Turns a failed response into an AiError, with the provider's message (without the key) when it sent one. */
@@ -230,6 +282,39 @@ const venice: ProviderAdapter = {
     const response = await call(fetch, AI_PROVIDERS.venice.endpoints.chat, init);
     if (!response.ok) throw await failure(response, apiKey);
     return readChatStream(response, chat);
+  },
+  async generateImage({ model, prompt, apiKey, signal, fetch }) {
+    const init: RequestInit = {
+      method: 'POST',
+      headers: headers(apiKey, true),
+      // safe_mode stays on (Venice's default) and is always sent: it's a kid's app.
+      // The picture comes back as the answer's bytes, so the refusal headers below come with it.
+      body: JSON.stringify({ model, prompt, safe_mode: true, return_binary: true, format: 'webp' }),
+      signal,
+    };
+    const response = await call(fetch, AI_PROVIDERS.venice.endpoints.image, init);
+    if (!response.ok) throw await failure(response, apiKey);
+    // With safe mode on, an adult picture comes back blurred, and one against the provider's
+    // terms comes back flagged. Neither is shown to her. The headers are readable only if
+    // Venice exposes them to web pages (CORS); to be checked once on her iPhone.
+    if (response.headers.get('x-venice-is-blurred') === 'true' || response.headers.get('x-venice-is-content-violation') === 'true') {
+      await response.body?.cancel().catch(() => undefined);
+      throw new AiError('refused');
+    }
+    const type = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    if (!(IMAGE_TYPES as readonly string[]).includes(type)) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new AiError('bad-response', 'not a picture');
+    }
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await readLimitedBytes(response, MAX_IMAGE_BYTES);
+    } catch (err) {
+      if (err instanceof AiError || signal.aborted) throw err; // send.ts tells a timeout from a stop
+      throw new AiError('network', errorName(err));
+    }
+    if (bytes.byteLength === 0) throw new AiError('bad-response', 'empty picture');
+    return { type: type as ImageType, bytes };
   },
   async checkKey({ apiKey, signal, fetch }) {
     const response = await call(fetch, AI_PROVIDERS.venice.endpoints.check, { method: 'GET', headers: headers(apiKey, false), signal });

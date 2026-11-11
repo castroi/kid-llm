@@ -12,6 +12,18 @@ export const BASELINE_PROMPT = [
   'Answer in simple Hebrew unless the child writes in another language.',
 ].join(' ');
 
+/**
+ * Added to every request for a picture, after what she wrote. An image model takes no
+ * separate instructions, so this is the only place to ask for a child-safe picture; the
+ * provider's safe mode is always on as well.
+ */
+export const IMAGE_BASELINE = 'A picture for a child: friendly and safe for children, with no nudity, no gore and no frightening content.';
+
+/** The text sent for a picture: what she asked for, then the child-safety line. */
+export function imagePromptFor(herText: string): string {
+  return `${herText.trim()}\n\n${IMAGE_BASELINE}`;
+}
+
 /** The system message for a call: the baseline, then what the parent wrote. */
 export function systemPromptFor(parentPrompt: string): string {
   const own = parentPrompt.trim();
