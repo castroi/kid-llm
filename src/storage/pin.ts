@@ -39,7 +39,7 @@ export type PinResult = 'ok' | 'wrong' | 'locked';
 const toHex = (bytes: Uint8Array) => Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
 const fromHex = (hex: string) => Uint8Array.from(hex.match(/../g) ?? [], (pair) => parseInt(pair, 16));
 
-async function derive(pin: string, salt: Uint8Array, iterations: number, hasher: Hasher): Promise<string> {
+async function derive(pin: string, salt: BufferSource, iterations: number, hasher: Hasher): Promise<string> {
   const key = await hasher.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
   const bits = await hasher.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations }, key, 256);
   return toHex(new Uint8Array(bits));
