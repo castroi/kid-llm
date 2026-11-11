@@ -1,6 +1,6 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
-import { ATTEMPTS_KEY, checkPin, FIRST_LOCK_MS, hasPin, lockedFor, lockMs, MAX_LOCK_MS, MAX_TRIES, PIN_KEY, setPin } from './pin';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ATTEMPTS_KEY, checkPin, FIRST_LOCK_MS, hasPin, lockedFor, lockMs, MAX_CHECK_MS, MAX_LOCK_MS, MAX_TRIES, PIN_KEY, setPin } from './pin';
 
 function memory(initial: Record<string, string> = {}) {
   const entries = new Map(Object.entries(initial));
@@ -181,5 +181,21 @@ describe('tries that start together', () => {
     const tries = [...Array.from({ length: MAX_TRIES }, () => '0000'), '4821'];
     const results = await Promise.all(tries.map((pin) => checkPin(pin, NOW, storage)));
     expect(results.at(-1)).toBe('locked');
+  });
+});
+
+describe('a check that never ends', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('does not keep the next check waiting for ever', async () => {
+    const storage = memory();
+    await setPin('4821', storage);
+    vi.useFakeTimers();
+    // A hashing call that never answers.
+    const stuck = { getRandomValues: crypto.getRandomValues.bind(crypto), subtle: { ...crypto.subtle, importKey: () => new Promise<never>(() => undefined) } } as unknown as Crypto;
+    void checkPin('4821', NOW, storage, stuck);
+    const next = checkPin('4821', NOW, storage);
+    await vi.advanceTimersByTimeAsync(MAX_CHECK_MS);
+    expect(await next).toBe('ok');
   });
 });

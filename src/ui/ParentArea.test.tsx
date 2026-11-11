@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiError } from '../ai/providers';
@@ -154,6 +154,30 @@ describe("the parent's code", () => {
       vi.advanceTimersByTime(1000);
       expect(onClose).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('does not count an empty current code as a try', async () => {
+    const { phone } = await openSettings();
+    const triesSoFar = phone.tried.length;
+    await userEvent.click(screen.getByRole('button', { name: 'שינוי קוד הורים' }));
+    await userEvent.type(screen.getByLabelText('קוד חדש (4 עד 8 ספרות)'), '135790');
+    await userEvent.type(screen.getByLabelText('שוב, לאימות'), '135790');
+    await userEvent.click(screen.getByRole('button', { name: 'החלפת הקוד' }));
+    expect(screen.getByText('צריך להזין את הקוד הנוכחי.')).toBeInTheDocument();
+    expect(phone.tried).toHaveLength(triesSoFar);
+    expect(phone.pin).toBe('2468');
+  });
+
+  it('closes at once when wrong current codes lock it', async () => {
+    const { phone, onClose } = await openSettings();
+    await userEvent.click(screen.getByRole('button', { name: 'שינוי קוד הורים' }));
+    phone.lockedMs = 60_000; // the wrong try below is the one that locks it
+    await userEvent.type(screen.getByLabelText('הקוד הנוכחי'), '0000');
+    await userEvent.type(screen.getByLabelText('קוד חדש (4 עד 8 ספרות)'), '135790');
+    await userEvent.type(screen.getByLabelText('שוב, לאימות'), '135790');
+    await userEvent.click(screen.getByRole('button', { name: 'החלפת הקוד' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(phone.pin).toBe('2468');
   });
 
   it('lets the parent change the code', async () => {

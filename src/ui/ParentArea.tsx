@@ -69,7 +69,7 @@ export function ParentArea({ parent, onClose, onChatsDeleted }: ParentAreaProps)
           </section>
         )}
         {phase === 'enter' && <EnterCode parent={parent} onRight={() => setPhase('open')} />}
-        {phase === 'open' && <SettingsForm parent={parent} onChatsDeleted={onChatsDeleted} />}
+        {phase === 'open' && <SettingsForm parent={parent} onChatsDeleted={onChatsDeleted} onLocked={onClose} />}
       </main>
     </div>
   );
@@ -106,11 +106,13 @@ interface ChooseCodeProps {
   submitLabel: string;
   /** Changing an existing code: the current one is asked for and checked first. */
   checkCurrent?: (pin: string) => Promise<PinResult>;
+  /** Too many wrong current codes: the area is locked now. */
+  onLocked?: () => void;
   onChosen: (pin: string) => Promise<boolean>;
   onDone: () => void;
 }
 
-function ChooseCode({ submitLabel, checkCurrent, onChosen, onDone }: ChooseCodeProps) {
+function ChooseCode({ submitLabel, checkCurrent, onLocked, onChosen, onDone }: ChooseCodeProps) {
   const [current, setCurrent] = useState('');
   const [first, setFirst] = useState('');
   const [second, setSecond] = useState('');
@@ -121,13 +123,17 @@ function ChooseCode({ submitLabel, checkCurrent, onChosen, onDone }: ChooseCodeP
     event.preventDefault();
     if (!PIN_PATTERN.test(first)) return setProblem('הקוד צריך להיות 4 עד 8 ספרות.');
     if (first !== second) return setProblem('שני הקודים לא זהים.');
+    // An empty current code is not a try: it is not checked and not counted.
+    if (checkCurrent && !current) return setProblem('צריך להזין את הקוד הנוכחי.');
     setSaving(true);
     if (checkCurrent) {
       const result = await checkCurrent(current).catch(() => 'wrong' as const);
       if (result !== 'ok') {
         setSaving(false);
         setCurrent('');
-        return setProblem(result === 'locked' ? 'יותר מדי ניסיונות. הקוד לא הוחלף.' : 'הקוד הנוכחי שגוי.');
+        // Locked: whoever is here doesn't know the code, so the open area closes at once.
+        if (result === 'locked') return onLocked?.();
+        return setProblem('הקוד הנוכחי שגוי.');
       }
     }
     const saved = await onChosen(first).catch(() => false);
@@ -186,7 +192,7 @@ function EnterCode({ parent, onRight }: { parent: ParentServices; onRight: () =>
 
 type Check = { state: 'idle' } | { state: 'checking' } | { state: 'ok'; note: string | null } | { state: 'failed'; text: string; detail: string };
 
-function SettingsForm({ parent, onChatsDeleted }: { parent: ParentServices; onChatsDeleted: () => void }) {
+function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServices; onChatsDeleted: () => void; onLocked: () => void }) {
   const [draft, setDraft] = useState<Settings>(() => parent.loadSettings());
   const [limitText, setLimitText] = useState(() => (draft.dailyLimit === null ? '' : String(draft.dailyLimit)));
   // The saved key is never read back: only whether there is one. What is typed here replaces it on save.
@@ -413,6 +419,7 @@ function SettingsForm({ parent, onChatsDeleted }: { parent: ParentServices; onCh
           <ChooseCode
             submitLabel="החלפת הקוד"
             checkCurrent={parent.checkPin}
+            onLocked={onLocked}
             onChosen={parent.setPin}
             onDone={() => {
               setChangingCode(false);
