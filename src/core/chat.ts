@@ -82,9 +82,12 @@ export const MAX_CONTEXT_CHARS = 24_000;
  * always goes, cut to `maxChars`. Empty when there is nothing of hers to answer.
  */
 export function toProviderMessages(messages: readonly StoredMessage[], maxChars: number = MAX_CONTEXT_CHARS): ChatMessage[] {
-  const usable = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.text.trim() !== '' && m.state !== 'failed');
-  // Only a conversation that ends with her message has something to answer.
-  while (usable.length > 0 && usable[usable.length - 1].role !== 'user') usable.pop();
+  const known = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string');
+  // Only a conversation that ends with a message of hers has something to answer; an
+  // earlier question that already got its answer is never sent again on its own.
+  const newest = known[known.length - 1];
+  if (!newest || newest.role !== 'user' || newest.text.trim() === '') return [];
+  const usable = known.filter((m) => m.text.trim() !== '' && m.state !== 'failed');
 
   const kept: ChatMessage[] = [];
   let used = 0;
