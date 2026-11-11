@@ -152,4 +152,34 @@ describe('a phone that refuses to save', () => {
     expect(await checkPin('4821', NOW, storage)).toBe('ok');
     expect(await checkPin('0000', NOW, storage)).toBe('wrong');
   });
+
+  it('still locks after too many wrong tries, counting them in memory', async () => {
+    const good = memory();
+    await setPin('4821', good);
+    const storage = refusing({ [PIN_KEY]: good.entries.get(PIN_KEY)! });
+    expect(await wrongTries(MAX_TRIES, storage)).toEqual(['wrong', 'wrong', 'wrong', 'wrong', 'locked']);
+    expect(lockedFor(NOW, storage)).toBe(FIRST_LOCK_MS); // nothing could be written, the lock is in memory
+    expect(await checkPin('4821', NOW, storage)).toBe('locked'); // so the right code waits too
+    expect(await checkPin('4821', NOW + FIRST_LOCK_MS, storage)).toBe('ok');
+  });
+});
+
+describe('tries that start together', () => {
+  it('are checked one at a time, so only the allowed number is checked before the lock', async () => {
+    const storage = memory();
+    await setPin('4821', storage);
+    const results = await Promise.all(Array.from({ length: 12 }, () => checkPin('0000', NOW, storage)));
+    expect(results.filter((r) => r === 'wrong')).toHaveLength(MAX_TRIES - 1);
+    expect(results.filter((r) => r === 'locked')).toHaveLength(12 - MAX_TRIES + 1);
+    // The tries made after the lock were not checked or counted.
+    expect(JSON.parse(storage.entries.get(ATTEMPTS_KEY)!).failed).toBe(MAX_TRIES);
+  });
+
+  it('cannot slip the right code in among wrong ones once the lock has started', async () => {
+    const storage = memory();
+    await setPin('4821', storage);
+    const tries = [...Array.from({ length: MAX_TRIES }, () => '0000'), '4821'];
+    const results = await Promise.all(tries.map((pin) => checkPin(pin, NOW, storage)));
+    expect(results.at(-1)).toBe('locked');
+  });
 });

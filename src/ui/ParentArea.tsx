@@ -1,10 +1,10 @@
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
 import { AiError } from '../ai/providers';
 import type { ParentServices } from '../app/parentServices';
 import { isReady, MODES } from '../core/modes';
 import { parentMessage, waitText } from '../core/parentMessages';
-import { PIN_PATTERN } from '../storage/pin';
+import { PIN_PATTERN, type PinResult } from '../storage/pin';
 import { MAX_DAILY_LIMIT, MAX_MODEL_CHARS, MAX_NAME_CHARS, MAX_SYSTEM_PROMPT_CHARS, type Settings } from '../storage/settings';
 
 export interface ParentAreaProps {
@@ -14,13 +14,33 @@ export interface ParentAreaProps {
   onChatsDeleted: () => void;
 }
 
+/** With no touch for this long the area closes, so a phone left open on it doesn't stay open. */
+export const IDLE_CLOSE_MS = 3 * 60_000;
+
 /**
  * The parent's settings, behind the parent's code. The first visit asks to choose a code.
- * It closes by itself when the app goes to the background, so a phone handed back to her
- * is never left open on this screen.
+ * It closes by itself when the app goes to the background and after a few minutes with no
+ * touch, so a phone handed back to her is not left open on this screen.
  */
 export function ParentArea({ parent, onClose, onChatsDeleted }: ParentAreaProps) {
   const [phase, setPhase] = useState<'choose' | 'enter' | 'open'>(() => (parent.hasPin() ? 'enter' : 'choose'));
+  // No code on the phone, yet a key or settings are: the code's record was lost or removed.
+  // Choosing a new code then starts from nothing, so it can't be a way around the old one.
+  const [leftover] = useState(() => !parent.hasPin() && parent.hasSetup());
+  const chooseFirstCode = async (pin: string) => {
+    if (leftover && !parent.forgetSetup()) return false;
+    return parent.setPin(pin);
+  };
+
+  const idle = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const touched = () => {
+    clearTimeout(idle.current);
+    idle.current = setTimeout(onClose, IDLE_CLOSE_MS);
+  };
+  useEffect(() => {
+    idle.current = setTimeout(onClose, IDLE_CLOSE_MS);
+    return () => clearTimeout(idle.current);
+  }, [onClose]);
 
   useEffect(() => {
     const onHide = () => {
@@ -31,7 +51,7 @@ export function ParentArea({ parent, onClose, onChatsDeleted }: ParentAreaProps)
   }, [onClose]);
 
   return (
-    <div className="parent">
+    <div className="parent" onPointerDown={touched} onKeyDown={touched} onInput={touched}>
       <header className="top-bar">
         <span className="top-bar-side" />
         <h1 className="top-bar-title">אזור הורים</h1>
@@ -44,7 +64,8 @@ export function ParentArea({ parent, onClose, onChatsDeleted }: ParentAreaProps)
           <section className="card">
             <h2 className="card-title">בחירת קוד הורים</h2>
             <p className="hint">הקוד שומר על ההגדרות מפני הילדה. אם הוא נשכח, צריך למחוק את נתוני האתר בספארי ולהגדיר הכול מחדש.</p>
-            <ChooseCode submitLabel="שמירת הקוד" onChosen={parent.setPin} onDone={() => setPhase('open')} />
+            {leftover && <p className="hint">לא נמצא קוד הורים באייפון הזה. בחירת קוד חדש תמחק את המפתח ואת ההגדרות השמורים.</p>}
+            <ChooseCode submitLabel="שמירת הקוד" onChosen={chooseFirstCode} onDone={() => setPhase('open')} />
           </section>
         )}
         {phase === 'enter' && <EnterCode parent={parent} onRight={() => setPhase('open')} />}
@@ -54,17 +75,23 @@ export function ParentArea({ parent, onClose, onChatsDeleted }: ParentAreaProps)
   );
 }
 
-/** Digits only, hidden while typed, and never offered to the phone's password manager. */
+/**
+ * Digits only, shown as dots. A plain text field made to look like a password field (the
+ * `secret` class): Safari offers to save real password fields in iCloud Keychain whatever
+ * the page asks, and a saved code would be offered to her on the same phone.
+ */
 function CodeField({ id, label, value, onChange, autoFocus }: { id: string; label: string; value: string; onChange: (value: string) => void; autoFocus?: boolean }) {
   return (
     <div className="field">
       <label htmlFor={id}>{label}</label>
       <input
         id={id}
-        className="input"
-        type="password"
+        className="input secret"
+        type="text"
         inputMode="numeric"
         autoComplete="off"
+        autoCorrect="off"
+        spellCheck={false}
         maxLength={8}
         dir="ltr"
         value={value}
@@ -75,7 +102,16 @@ function CodeField({ id, label, value, onChange, autoFocus }: { id: string; labe
   );
 }
 
-function ChooseCode({ submitLabel, onChosen, onDone }: { submitLabel: string; onChosen: (pin: string) => Promise<boolean>; onDone: () => void }) {
+interface ChooseCodeProps {
+  submitLabel: string;
+  /** Changing an existing code: the current one is asked for and checked first. */
+  checkCurrent?: (pin: string) => Promise<PinResult>;
+  onChosen: (pin: string) => Promise<boolean>;
+  onDone: () => void;
+}
+
+function ChooseCode({ submitLabel, checkCurrent, onChosen, onDone }: ChooseCodeProps) {
+  const [current, setCurrent] = useState('');
   const [first, setFirst] = useState('');
   const [second, setSecond] = useState('');
   const [problem, setProblem] = useState('');
@@ -86,6 +122,14 @@ function ChooseCode({ submitLabel, onChosen, onDone }: { submitLabel: string; on
     if (!PIN_PATTERN.test(first)) return setProblem('הקוד צריך להיות 4 עד 8 ספרות.');
     if (first !== second) return setProblem('שני הקודים לא זהים.');
     setSaving(true);
+    if (checkCurrent) {
+      const result = await checkCurrent(current).catch(() => 'wrong' as const);
+      if (result !== 'ok') {
+        setSaving(false);
+        setCurrent('');
+        return setProblem(result === 'locked' ? 'יותר מדי ניסיונות. הקוד לא הוחלף.' : 'הקוד הנוכחי שגוי.');
+      }
+    }
     const saved = await onChosen(first).catch(() => false);
     setSaving(false);
     if (saved) onDone();
@@ -94,7 +138,8 @@ function ChooseCode({ submitLabel, onChosen, onDone }: { submitLabel: string; on
 
   return (
     <form className="form" onSubmit={(event) => void submit(event)}>
-      <CodeField id="new-code" label="קוד חדש (4 עד 8 ספרות)" value={first} onChange={setFirst} autoFocus />
+      {checkCurrent && <CodeField id="current-code" label="הקוד הנוכחי" value={current} onChange={setCurrent} autoFocus />}
+      <CodeField id="new-code" label="קוד חדש (4 עד 8 ספרות)" value={first} onChange={setFirst} autoFocus={!checkCurrent} />
       <CodeField id="new-code-again" label="שוב, לאימות" value={second} onChange={setSecond} />
       <p className="status" role="status">
         {problem}
@@ -234,8 +279,8 @@ function SettingsForm({ parent, onChatsDeleted }: { parent: ParentServices; onCh
             <label htmlFor="api-key">מפתח API</label>
             <input
               id="api-key"
-              className="input"
-              type="password"
+              className="input secret"
+              type="text"
               autoComplete="off"
               autoCapitalize="off"
               autoCorrect="off"
@@ -367,6 +412,7 @@ function SettingsForm({ parent, onChatsDeleted }: { parent: ParentServices; onCh
         {changingCode && (
           <ChooseCode
             submitLabel="החלפת הקוד"
+            checkCurrent={parent.checkPin}
             onChosen={parent.setPin}
             onDone={() => {
               setChangingCode(false);

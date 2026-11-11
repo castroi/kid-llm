@@ -1,23 +1,30 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
+import { AiError, type ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
 import { SETUP_MESSAGE } from '../core/kidMessages';
+import type { ChatStore } from '../storage/chatStore';
 import { fakeParent } from '../test/fakeParent';
+import { memoryStore } from '../test/memoryStore';
 import { App } from './App';
 import type { Services } from './useChat';
 
 /** The app on a phone nobody has set up, with the chat and the parent area sharing one storage. */
-function openApp() {
+function openApp(options: { store?: ChatStore; send?: (request: ChatRequest) => Promise<ChatResult> } = {}) {
   const { parent, phone } = fakeParent();
+  const store = options.store ?? null;
+  // "Delete all" on a phone with storage really empties it, as the real one does.
+  if (store) parent.deleteAllChats = () => store.clear();
   const requests: ChatRequest[] = [];
   let id = 0;
   const services: Services = {
-    store: null,
+    store,
     loadSettings: () => phone.settings,
     loadApiKey: () => phone.apiKey,
     sendChat: async (request) => {
       requests.push(request);
+      if (options.send) return options.send(request);
       request.onDelta('היי!');
       return { text: 'היי!', finishReason: 'stop' };
     },
@@ -112,5 +119,37 @@ describe('the way into the parent area', () => {
     expect(screen.queryByText('היי!')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /על מה נדבר היום/ })).toBeInTheDocument();
     expect(phone.chatsDeleted).toBe(1);
+  });
+
+  it('does not bring a chat back after "delete all" when its answer was still being written', async () => {
+    const store = memoryStore();
+    // Writes half an answer and keeps the call open until it is stopped.
+    const hangs = (request: ChatRequest) =>
+      new Promise<ChatResult>((_, reject) => {
+        request.onDelta('חצי תשובה');
+        request.signal?.addEventListener('abort', () => reject(new AiError('cancelled')));
+      });
+    const { phone } = openApp({ store, send: hangs });
+    phone.pin = '2468';
+    phone.apiKey = 'sk-parent';
+    phone.settings = { ...phone.settings, models: { ...phone.settings.models, chat: 'kid-model' } };
+    await openParentArea();
+    await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
+    await userEvent.type(screen.getByLabelText('הודעה'), 'שלום');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    await screen.findByText('חצי תשובה');
+    expect(store.chats.size).toBe(1);
+
+    await openParentArea();
+    await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
+    await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'מחיקת כל השיחות' }));
+    await userEvent.click(screen.getByRole('button', { name: 'כן, למחוק הכול' }));
+    await screen.findByText('כל השיחות נמחקו מהאייפון.');
+    // The stopped answer's last save found the chat gone and wrote nothing.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(store.chats.size).toBe(0);
+    await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
+    expect(screen.queryByText('חצי תשובה')).not.toBeInTheDocument();
   });
 });

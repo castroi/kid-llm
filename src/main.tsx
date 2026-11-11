@@ -6,7 +6,7 @@ import type { ParentServices } from './app/parentServices';
 import type { Services } from './app/useChat';
 import { openChatStore, requestPersistence, type ChatStore } from './storage/chatStore';
 import { checkPin, hasPin, lockedFor, setPin } from './storage/pin';
-import { loadApiKey, loadSettings, saveApiKey, saveSettings } from './storage/settings';
+import { forgetSetup, hasSetup, loadApiKey, loadSettings, saveApiKey, saveSettings } from './storage/settings';
 import { countMessage, resetUsage, sentToday } from './storage/usage';
 import './styles.css';
 
@@ -33,6 +33,8 @@ function browserParentServices(store: ChatStore | null): ParentServices {
     hasApiKey: (provider) => loadApiKey(provider) !== '',
     saveApiKey: (provider, apiKey) => saveApiKey(provider, apiKey),
     checkConnection: (provider, typedKey) => checkConnection(provider, typedKey.trim() || loadApiKey(provider)),
+    hasSetup: () => hasSetup(),
+    forgetSetup: () => forgetSetup(),
     hasPin: () => hasPin(),
     setPin: (pin) => setPin(pin),
     checkPin: (pin) => checkPin(pin, Date.now()),

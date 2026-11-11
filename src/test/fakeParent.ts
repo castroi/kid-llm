@@ -48,6 +48,13 @@ export function fakeParent(initial: Partial<FakePhone> = {}, check: () => Promis
       phone.checkedWith.push(typedKey);
       return check();
     },
+    hasSetup: () => phone.apiKey !== '' || JSON.stringify(phone.settings) !== JSON.stringify(DEFAULT_SETTINGS),
+    forgetSetup: () => {
+      if (phone.refuses) return false;
+      phone.apiKey = '';
+      phone.settings = { ...DEFAULT_SETTINGS, models: { ...DEFAULT_SETTINGS.models } };
+      return true;
+    },
     hasPin: () => phone.pin !== null,
     setPin: async (pin) => {
       if (phone.refuses) return false;
