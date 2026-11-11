@@ -18,6 +18,11 @@ export interface ChatStore {
    * end of an answer: if she (or a parent) deleted the chat meanwhile, it must not come back.
    */
   update(chat: Chat): Promise<boolean>;
+  /**
+   * Gives a chat another name and changes nothing else, in one step: a save of its messages
+   * that lands just before or after can't be lost. Says whether the chat was there.
+   */
+  rename(id: string, title: string): Promise<boolean>;
   remove(id: string): Promise<void>;
   /** Deletes every chat ("מחיקת כל השיחות"). */
   clear(): Promise<void>;
@@ -121,6 +126,19 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
         existing.onsuccess = () => {
           found = existing.result !== undefined;
           if (found) store.put(chat);
+        };
+      });
+      return found;
+    },
+    async rename(id, title) {
+      let found = false;
+      // Read and written in one transaction, so no other save can land in between.
+      await write((store) => {
+        const existing = store.get(id);
+        existing.onsuccess = () => {
+          const chat = sanitizeChat(existing.result);
+          found = chat !== null;
+          if (chat) store.put({ ...chat, title });
         };
       });
       return found;

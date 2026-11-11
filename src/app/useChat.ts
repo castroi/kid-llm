@@ -58,7 +58,8 @@ export function useChat(services: Services): ChatController {
   const [mode, setModeState] = useState<ModeId>(DEFAULT_MODE);
   const [writing, setWriting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
-  const [notSaved, setNotSaved] = useState(services.store === null);
+  // The chat whose last save failed. The notice belongs to that chat only.
+  const [unsavedId, setUnsavedId] = useState<string | null>(null);
   // Messages the phone refused to count; the limit still holds until the app is closed.
   const uncounted = useRef(0);
 
@@ -84,9 +85,9 @@ export function useChat(services: Services): ChatController {
       saving.then(
         // "Saved" only after a write that really happened; update() writes nothing when the chat is gone.
         (written) => {
-          if (written) setNotSaved(false);
+          if (written) setUnsavedId((id) => (id === toSave.id ? null : id));
         },
-        () => setNotSaved(true),
+        () => setUnsavedId(toSave.id),
       );
     },
     [services.store],
@@ -242,10 +243,8 @@ export function useChat(services: Services): ChatController {
       // While its answer is being written the chat is about to be saved again; the name waits.
       if (!services.store || !title.trim() || (busy.current && shown.current.id === id)) return false;
       try {
-        const found = await services.store.get(id);
-        if (!found) return false;
         const name = titleFrom(title);
-        const written = await services.store.update({ ...found, title: name });
+        const written = await services.store.rename(id, name);
         if (written && shown.current.id === id) show({ ...shown.current, title: name });
         return written;
       } catch {
@@ -278,5 +277,6 @@ export function useChat(services: Services): ChatController {
     if (isReady(next)) setModeState(next);
   }, []);
 
+  const notSaved = services.store === null || unsavedId === chat.id;
   return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat, removeChat };
 }

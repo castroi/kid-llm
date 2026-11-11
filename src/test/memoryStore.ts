@@ -21,6 +21,11 @@ export function memoryStore(initial: Chat[] = []): ChatStore & { chats: Map<stri
       if (there) chats.set(chat.id, chat);
       return Promise.resolve(there);
     },
+    rename: (id, title) => {
+      const chat = chats.get(id);
+      if (chat) chats.set(id, { ...chat, title });
+      return Promise.resolve(chat !== undefined);
+    },
     remove: (id) => {
       chats.delete(id);
       return Promise.resolve();

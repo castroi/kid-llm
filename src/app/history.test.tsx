@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AiError, type ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
 import type { Chat } from '../core/chat';
+import { NOT_SAVED_MESSAGE } from '../core/kidMessages';
 import type { ChatStore } from '../storage/chatStore';
 import { fakeParent } from '../test/fakeParent';
 import { memoryStore } from '../test/memoryStore';
@@ -147,6 +148,48 @@ describe('the list of chats', () => {
     expect(store.chats.get('b')?.messages).toHaveLength(2);
     await userEvent.click(list.getByRole('button', { name: 'סגירת הרשימה' }));
     expect(title()).toBe('שיעורי בית בחשבון');
+  });
+
+  it('does not rename a chat while its answer is still being written', async () => {
+    const store = memoryStore();
+    openApp(store, hangs);
+    await say('שלום');
+    await screen.findByText('חצי תשובה');
+    const list = await openList();
+    await userEvent.click(await list.findByRole('button', { name: 'אפשרויות לשיחה: שלום' }));
+    await userEvent.click(list.getByRole('button', { name: 'שינוי שם' }));
+    await userEvent.clear(list.getByLabelText('שם השיחה'));
+    await userEvent.type(list.getByLabelText('שם השיחה'), 'שם אחר');
+    await userEvent.click(list.getByRole('button', { name: 'שמירת השם' }));
+    expect(await list.findByText('השם לא נשמר.')).toBeInTheDocument();
+    expect([...store.chats.values()][0].title).toBe('שלום');
+    expect(title()).toBe('שלום');
+  });
+
+  it('keeps the screen behind the list out of reach, and gives the focus back when it closes', async () => {
+    openApp(memoryStore());
+    const menu = screen.getByRole('button', { name: 'השיחות שלי' });
+    const list = await openList();
+    const dialog = screen.getByRole('dialog', { name: 'השיחות שלי' });
+    expect(screen.getByLabelText('הודעה').closest('[inert]')).not.toBeNull();
+    expect(dialog.closest('[inert]')).toBeNull();
+    expect(dialog).toHaveFocus();
+    await userEvent.click(list.getByRole('button', { name: 'סגירת הרשימה' }));
+    expect(screen.getByLabelText('הודעה').closest('[inert]')).toBeNull();
+    expect(menu).toHaveFocus();
+  });
+
+  it('says "not saved" only on the chat whose save failed', async () => {
+    const store = memoryStore([savedChat('old', 'שיחה ישנה', NOW - DAY)]);
+    // The phone refuses to save any new chat.
+    store.save = () => Promise.reject(new Error('full'));
+    openApp(store);
+    await say('שלום');
+    expect(await screen.findByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+    const list = await openList();
+    await userEvent.click(await list.findByRole('button', { name: 'שיחה ישנה' }));
+    await waitFor(() => expect(title()).toBe('שיחה ישנה'));
+    expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
   });
 
   it('deletes a chat only after she confirms', async () => {
