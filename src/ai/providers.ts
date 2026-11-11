@@ -54,6 +54,8 @@ export interface ChatCall {
   apiKey: string;
   signal: AbortSignal;
   fetch: FetchLike;
+  /** Search mode: the provider looks the question up on the web before it answers. */
+  webSearch: boolean;
   /** Called with each piece of the answer as it arrives. */
   onDelta: (text: string) => void;
   /** Called whenever the provider sends anything, also while a model thinks before it writes. */
@@ -211,7 +213,7 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
 
 const venice: ProviderAdapter = {
   async streamChat(chat) {
-    const { model, systemPrompt, messages, apiKey, signal, fetch } = chat;
+    const { model, systemPrompt, messages, apiKey, signal, fetch, webSearch } = chat;
     const init: RequestInit = {
       method: 'POST',
       headers: headers(apiKey, true),
@@ -220,7 +222,8 @@ const venice: ProviderAdapter = {
         messages: [{ role: 'system', content: systemPrompt }, ...messages],
         stream: true,
         // Venice adds its own system prompt unless told not to; only the parent's goes with her chat.
-        venice_parameters: { include_venice_system_prompt: false },
+        // Search mode always searches ("on"), so she gets what she picked; other modes never do.
+        venice_parameters: { include_venice_system_prompt: false, ...(webSearch ? { enable_web_search: 'on' } : {}) },
       }),
       signal,
     };

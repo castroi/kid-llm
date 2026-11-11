@@ -123,8 +123,11 @@ export function useChat(services: Services): ChatController {
           provider: settings.provider,
           model: settings.models[forMode],
           systemPrompt: settings.systemPrompt,
-          messages: toProviderMessages(base.messages),
+          // A search call carries only what she wrote in search mode (and its answers): what she
+          // said in other modes of the same chat is not handed to a search engine.
+          messages: toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages),
           apiKey,
+          webSearch: forMode === 'search',
           signal: controller.signal,
           onDelta: (piece) => {
             // Another answer to the same message counts toward the day only once it really arrives.
@@ -189,14 +192,18 @@ export function useChat(services: Services): ChatController {
   const stop = useCallback(() => stopper.current?.abort(), []);
 
   const retry = useCallback(() => {
-    if (busy.current || !isReady(mode)) return;
+    if (busy.current) return;
     const messages = shown.current.messages;
     let last = messages.length - 1;
     while (last >= 0 && messages[last].role !== 'user') last--;
     if (last < 0) return;
+    // Asked again in the mode her message was written in, whatever the picker shows now:
+    // a question from plain chat is never sent to a web search by "try again".
+    const forMode = messages[last].mode;
+    if (!isReady(forMode)) return;
     const settings = services.loadSettings();
     const apiKey = services.loadApiKey(settings.provider);
-    if (missingFor(mode, settings, apiKey)) return;
+    if (missingFor(forMode, settings, apiKey)) return;
     // The answers after her last message are replaced by the new one, once it starts to arrive.
     const base = { ...shown.current, messages: messages.slice(0, last + 1) };
     const replaced = messages.slice(last + 1);
@@ -205,8 +212,8 @@ export function useChat(services: Services): ChatController {
     // a paid call like any message: it stops at the limit, and counts once the new answer arrives.
     const hadAnswer = replaced.some((m) => m.text.trim() !== '' && m.state !== 'failed');
     if (hadAnswer && overLimit(settings)) return;
-    void answer(base, mode, settings, apiKey, replaced, hadAnswer);
-  }, [services, mode, answer, overLimit]);
+    void answer(base, forMode, settings, apiKey, replaced, hadAnswer);
+  }, [services, answer, overLimit]);
 
   /** Leaves the chat on the screen: an answer being written is stopped (what was written is kept with its chat). */
   const leave = useCallback(() => {

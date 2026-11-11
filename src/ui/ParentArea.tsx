@@ -348,6 +348,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             </div>
           ))}
           <p className="hint">שם המודל כפי שהוא מופיע אצל הספק. הילדה רואה רק את שם המצב. כדאי לבחור רק מודלים עם סינון תוכן.</p>
+          <p className="hint">במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש. מצב בלי שם מודל לא יהיה זמין לה.</p>
         </section>
 
         <section className="card">
