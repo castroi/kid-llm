@@ -106,7 +106,7 @@ describe('drawing mode', () => {
     await waitFor(() => expect(screen.queryByText('מציירת...')).not.toBeInTheDocument());
     expect(screen.queryByRole('img')).not.toBeInTheDocument();
     // Her request stays, with no error: stopping was her choice.
-    expect(screen.getByText('דרקון קטן')).toBeInTheDocument();
+    expect(document.querySelector('.bubble')).toHaveTextContent('דרקון קטן');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     expect(sentNow()).toBe(1);
   });
