@@ -33,6 +33,11 @@ export const MAX_INLINE_CHARS = 2_000;
 const seen = new Map<string, Inline[]>();
 const MAX_SEEN = 2_000;
 
+/** Forgets the remembered lines, so answer text doesn't stay in memory after its chat is left or deleted. */
+export function forgetParsed(): void {
+  seen.clear();
+}
+
 /** One line's text, split into plain text, bold, code and left-to-right runs. */
 export function parseInline(line: string): Inline[] {
   if (line.length > MAX_INLINE_CHARS) return [{ kind: 'text', text: line }];
@@ -79,8 +84,9 @@ function splitInline(line: string): Inline[] {
  * Characters nobody sees that change the order text is shown in, or hide inside it:
  * direction overrides and marks, zero-width characters. A model could use them to make
  * a line read differently from what it says; they are removed before anything is shown or copied.
+ * The zero-width joiner (U+200D) stays: it changes no direction, and emoji made of several parts need it.
  */
-const HIDDEN = /[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
+const HIDDEN = /[\u061C\u200B\u200C\u200E\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
 
 /** The whole answer as blocks: code blocks (between ``` lines) and lines of text. */
 export function parseAnswer(text: string): Block[] {

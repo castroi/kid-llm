@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { AiProviderId } from '../ai/catalog';
 import { AiError, type AiErrorReason, type ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
+import { forgetParsed } from '../core/answerText';
 import { MAX_MESSAGE_CHARS, newChat, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
@@ -83,9 +84,13 @@ export function useChat(services: Services): ChatController {
     [services.store],
   );
 
+  const count = useCallback(() => {
+    if (!services.countMessage()) uncounted.current += 1;
+  }, [services]);
+
   /** Asks the provider for the answer to `base` (which ends with her message) and writes it as it arrives. */
   const answer = useCallback(
-    async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[] = []) => {
+    async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[] = [], countOnFirstPiece = false) => {
       const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode };
       let current = withMessage(base, reply);
       let text = '';
@@ -113,6 +118,8 @@ export function useChat(services: Services): ChatController {
           apiKey,
           signal: controller.signal,
           onDelta: (piece) => {
+            // Another answer to the same message counts toward the day only once it really arrives.
+            if (countOnFirstPiece && text === '') count();
             text += piece;
             write();
           },
@@ -138,7 +145,7 @@ export function useChat(services: Services): ChatController {
         keep(current, false);
       }
     },
-    [services, show, keep],
+    [services, show, keep, count],
   );
 
   /** True (with the kind notice) when she has used up the day. */
@@ -150,10 +157,6 @@ export function useChat(services: Services): ChatController {
     },
     [services],
   );
-
-  const count = useCallback(() => {
-    if (!services.countMessage()) uncounted.current += 1;
-  }, [services]);
 
   const send = useCallback(
     (text: string): boolean => {
@@ -190,14 +193,11 @@ export function useChat(services: Services): ChatController {
     const replaced = messages.slice(last + 1);
     if (toProviderMessages(base.messages).length === 0) return;
     // Trying again after a failure is free. Asking for another answer when one arrived is
-    // a paid call like any message, so it counts toward the day and stops at the limit.
+    // a paid call like any message: it stops at the limit, and counts once the new answer arrives.
     const hadAnswer = replaced.some((m) => m.text.trim() !== '' && m.state !== 'failed');
-    if (hadAnswer) {
-      if (overLimit(settings)) return;
-      count();
-    }
-    void answer(base, mode, settings, apiKey, replaced);
-  }, [services, mode, answer, overLimit, count]);
+    if (hadAnswer && overLimit(settings)) return;
+    void answer(base, mode, settings, apiKey, replaced, hadAnswer);
+  }, [services, mode, answer, overLimit]);
 
   const startNewChat = useCallback(() => {
     stopper.current?.abort();
@@ -205,6 +205,7 @@ export function useChat(services: Services): ChatController {
     busy.current = false;
     setWriting(false);
     setNotice(null);
+    forgetParsed();
     show(newChat(mode, services.now(), services.newId()));
   }, [services, mode, show]);
 

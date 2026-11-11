@@ -87,6 +87,8 @@ describe('a hostile or broken answer', () => {
     const tricky = 'בטוח\u202Eלא\u202C \u200Bלגמרי\u2066!\u2069\uFEFF';
     expect(parseAnswer(tricky)).toEqual([{ kind: 'line', heading: false, parts: [{ kind: 'text', text: 'בטוחלא לגמרי!' }] }]);
     expect(plainText(tricky)).toBe('בטוחלא לגמרי!');
+    // An emoji made of joined parts stays whole.
+    expect(plainText('כל הכבוד 👩\u200D🚀')).toBe('כל הכבוד 👩\u200D🚀');
   });
 });
 

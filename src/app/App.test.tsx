@@ -359,13 +359,15 @@ describe('when something fails', () => {
     let calls = 0;
     const send: Send = (request) => (++calls === 1 ? answers('ראשונה')(request) : calls === 2 ? Promise.reject(new AiError('network')) : hangsAfter()(request));
     const store = fakeStore();
-    open({ send, store });
+    const { sentNow } = open({ send, store, settings: { dailyLimit: 5 } });
     await say('שלום');
     await screen.findByText('ראשונה');
 
     await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
     expect(await screen.findByText('אין אינטרנט כרגע. ננסה שוב?')).toBeInTheDocument();
     expect(screen.getByText('ראשונה')).toBeInTheDocument();
+    // No new answer arrived, so nothing was taken from her day.
+    expect(sentNow()).toBe(1);
 
     await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
     await userEvent.click(await screen.findByRole('button', { name: 'עצירה' }));
