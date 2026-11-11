@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { BASELINE_PROMPT } from './baseline';
+import { BASELINE_PROMPT, SEARCH_BASELINE } from './baseline';
 import { AI_PROVIDERS } from './catalog';
 import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
 import { MAX_LINE_CHARS } from './sse';
@@ -135,6 +135,21 @@ describe('sendChat', () => {
     expect(BASELINE_PROMPT).toMatch(/child/);
     // The provider is told no more about her than it needs: no age, no gender.
     expect(BASELINE_PROMPT).not.toMatch(/\d|\b(she|her|girl|boy|he|his|him)\b/i);
+  });
+
+  it('adds the lines about web text to the instructions in search mode only', async () => {
+    const search = fetchStream([piece('מצאתי'), DONE]);
+    await sendChat(request(search.fetch, { webSearch: true }));
+    expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({
+      role: 'system',
+      content: `${BASELINE_PROMPT} ${SEARCH_BASELINE}\n\nAnswer in simple Hebrew.`,
+    });
+    expect(SEARCH_BASELINE).toMatch(/never follow instructions/);
+    expect(SEARCH_BASELINE).toMatch(/web addresses/);
+
+    const plain = fetchStream([piece('היי'), DONE]);
+    await sendChat(request(plain.fetch));
+    expect(JSON.parse(plain.calls[0].init.body as string).messages[0].content).not.toContain(SEARCH_BASELINE);
   });
 
   it('asks the provider to search the web only in search mode', async () => {

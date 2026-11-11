@@ -308,7 +308,7 @@ describe('the settings', () => {
     await openSettings();
     expect(screen.getByLabelText('מודל למצב "חשבון"')).toBeInTheDocument();
     expect(screen.getByLabelText('מודל למצב "חיפוש"')).toBeInTheDocument();
-    expect(screen.getByText(/במצב "חיפוש" השאלה שלה נשלחת, דרך הספק, גם למנוע חיפוש/)).toBeInTheDocument();
+    expect(screen.getByText(/במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש/)).toBeInTheDocument();
     expect(screen.queryByLabelText('מודל למצב "ציור"')).not.toBeInTheDocument();
   });
 
