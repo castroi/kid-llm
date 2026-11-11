@@ -178,7 +178,7 @@ describe('chatting', () => {
     open();
     await say('שלום');
     await screen.findByText('היי לך!');
-    expect(screen.getByText(/^שיחה · /)).toBeInTheDocument();
+    expect(screen.getByText(/^שיחה ·/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('model-chat');
   });
 
@@ -192,7 +192,7 @@ describe('chatting', () => {
     await say('כמה זה 2+2?');
     await screen.findByText('היי לך!');
     expect(requests[0].model).toBe('model-math');
-    expect(screen.getByText(/^חשבון · /)).toBeInTheDocument();
+    expect(screen.getByText(/^חשבון ·/)).toBeInTheDocument();
   });
 
   it('closes the mode sheet without changing anything when she taps outside it', async () => {

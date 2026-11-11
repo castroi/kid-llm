@@ -33,6 +33,11 @@ describe('parseInline', () => {
   it('never produces HTML: tags in an answer stay text', () => {
     expect(kinds('<img src=x onerror=alert(1)>')).toEqual(['text:<img src=x onerror=alert(1)>']);
   });
+
+  it('does not take a letter inside a word for maths', () => {
+    expect(kinds('src=x and max=5')).toEqual(['text:src=x and max=5']);
+    expect(kinds('x = 5')).toEqual(['ltr:x = 5']);
+  });
 });
 
 describe('parseAnswer', () => {

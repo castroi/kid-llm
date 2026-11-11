@@ -31,7 +31,8 @@ test('every mode is a touch target a kid can hit, and tapping one selects it', a
     expect(size!.height).toBeGreaterThanOrEqual(48);
   }
 
-  const math = page.getByRole('button', { name: /חשבון/ });
+  // Inside the group: once picked, the composer's chip carries the same name.
+  const math = page.getByRole('group', { name: 'מצב' }).getByRole('button', { name: /חשבון/ });
   await math.tap();
   await expect(math).toHaveAttribute('aria-pressed', 'true');
 });

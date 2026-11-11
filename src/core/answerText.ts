@@ -35,6 +35,9 @@ export function parseInline(line: string): Inline[] {
     from = match.index + whole.length;
     if (code !== undefined) push('code', code);
     else if (bold !== undefined) push('bold', bold);
+    // Part of a word ("src=x"), not maths. Checked here and not with a look-behind in the
+    // pattern, which older iPhones (before iOS 16.4) can't read at all.
+    else if (maths !== undefined && /[a-zA-Z\d]/.test(line[match.index - 1] ?? '')) push('text', whole);
     else {
       // A sentence's own full stop or comma stays with the sentence, not with the number or link.
       const run = link ?? maths;
