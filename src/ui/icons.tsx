@@ -92,3 +92,23 @@ export const LockIcon = () => (
     <path d="M8 11V8a4 4 0 0 1 8 0v3" />
   </Icon>
 );
+
+export const MenuIcon = () => (
+  <Icon>
+    <path d="M4 7h16M4 12h16M4 17h16" />
+  </Icon>
+);
+
+export const CloseIcon = () => (
+  <Icon>
+    <path d="M6 6l12 12M18 6L6 18" />
+  </Icon>
+);
+
+export const MoreIcon = () => (
+  <Icon>
+    <circle cx="6" cy="12" r="1" fill="currentColor" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" />
+    <circle cx="18" cy="12" r="1" fill="currentColor" />
+  </Icon>
+);

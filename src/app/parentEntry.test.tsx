@@ -34,10 +34,16 @@ function openApp() {
   return { phone, requests };
 }
 
+/** The way in: the list of chats, then the button at its bottom. */
+async function openParentArea() {
+  await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
+  await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
+}
+
 describe('the way into the parent area', () => {
-  it('opens from the lock in the top bar and asks for a code first', async () => {
+  it('opens from the bottom of the list of chats and asks for a code first', async () => {
     openApp();
-    await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
+    await openParentArea();
     expect(screen.getByRole('heading', { name: 'אזור הורים' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'בחירת קוד הורים' })).toBeInTheDocument();
     // The chat is not on the screen while the parent area is.
@@ -48,7 +54,7 @@ describe('the way into the parent area', () => {
     const { phone, requests } = openApp();
     expect(screen.getByText(SETUP_MESSAGE)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
+    await openParentArea();
     await userEvent.type(screen.getByLabelText('קוד חדש (4 עד 8 ספרות)'), '2468');
     await userEvent.type(screen.getByLabelText('שוב, לאימות'), '2468');
     await userEvent.click(screen.getByRole('button', { name: 'שמירת הקוד' }));
@@ -72,13 +78,13 @@ describe('the way into the parent area', () => {
   it('asks for the code again every time it is opened', async () => {
     const { phone } = openApp();
     phone.pin = '2468';
-    await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
+    await openParentArea();
     await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
     await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
     await screen.findByLabelText('מפתח API');
     await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
 
-    await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
+    await openParentArea();
     expect(screen.getByLabelText('קוד הורים')).toBeInTheDocument();
     expect(screen.queryByLabelText('מפתח API')).not.toBeInTheDocument();
   });
@@ -89,13 +95,13 @@ describe('the way into the parent area', () => {
     phone.apiKey = 'sk-parent';
     phone.settings = { ...phone.settings, models: { ...phone.settings.models, chat: 'kid-model' } };
     // The screen read the setup before the phone was set up; going through the parent area reads it again.
-    await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
+    await openParentArea();
     await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
     await userEvent.type(screen.getByLabelText('הודעה'), 'שלום');
     await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
     expect(await screen.findByText('היי!')).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
+    await openParentArea();
     await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
     await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
     await userEvent.click(await screen.findByRole('button', { name: 'מחיקת כל השיחות' }));

@@ -3,7 +3,7 @@ import type { AiProviderId } from '../ai/catalog';
 import { AiError, type AiErrorReason, type ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
 import { forgetParsed } from '../core/answerText';
-import { MAX_MESSAGE_CHARS, newChat, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type StoredMessage } from '../core/chat';
+import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
@@ -43,6 +43,14 @@ export interface ChatController {
   /** Asks again for an answer to her last message, replacing the last answer. */
   retry: () => void;
   startNewChat: () => void;
+  /** Her saved chats, most recently used first; empty when nothing is kept on this phone. */
+  listChats: () => Promise<ChatSummary[]>;
+  /** Puts a saved chat on the screen. False when it is no longer on the phone. */
+  openChat: (id: string) => Promise<boolean>;
+  /** Gives a saved chat another name. False when it wasn't saved (also while its answer is being written). */
+  renameChat: (id: string, title: string) => Promise<boolean>;
+  /** Deletes a saved chat from the phone; if it is the one on the screen, a new chat takes its place. */
+  removeChat: (id: string) => Promise<boolean>;
 }
 
 export function useChat(services: Services): ChatController {
@@ -199,19 +207,76 @@ export function useChat(services: Services): ChatController {
     void answer(base, mode, settings, apiKey, replaced, hadAnswer);
   }, [services, mode, answer, overLimit]);
 
-  const startNewChat = useCallback(() => {
+  /** Leaves the chat on the screen: an answer being written is stopped (what was written is kept with its chat). */
+  const leave = useCallback(() => {
     stopper.current?.abort();
     stopper.current = null;
     busy.current = false;
     setWriting(false);
     setNotice(null);
     forgetParsed();
+  }, []);
+
+  const startNewChat = useCallback(() => {
+    leave();
     show(newChat(mode, services.now(), services.newId()));
-  }, [services, mode, show]);
+  }, [services, mode, show, leave]);
+
+  const listChats = useCallback(async (): Promise<ChatSummary[]> => (services.store ? services.store.list() : []), [services.store]);
+
+  const openChat = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (id === shown.current.id) return true;
+      const found = await services.store?.get(id).catch(() => undefined);
+      if (!found) return false;
+      leave();
+      show(found);
+      if (isReady(found.mode)) setModeState(found.mode);
+      return true;
+    },
+    [services.store, show, leave],
+  );
+
+  const renameChat = useCallback(
+    async (id: string, title: string): Promise<boolean> => {
+      // While its answer is being written the chat is about to be saved again; the name waits.
+      if (!services.store || !title.trim() || (busy.current && shown.current.id === id)) return false;
+      try {
+        const found = await services.store.get(id);
+        if (!found) return false;
+        const name = titleFrom(title);
+        const written = await services.store.update({ ...found, title: name });
+        if (written && shown.current.id === id) show({ ...shown.current, title: name });
+        return written;
+      } catch {
+        return false;
+      }
+    },
+    [services.store, show],
+  );
+
+  const removeChat = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (!services.store) return false;
+      // The chat on the screen goes first, so an answer still being written can't save it back:
+      // its last save is asked for after this delete, and finds the chat gone.
+      const wasShown = shown.current.id === id;
+      if (wasShown) leave();
+      try {
+        const removing = services.store.remove(id);
+        if (wasShown) show(newChat(mode, services.now(), services.newId()));
+        await removing;
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [services, mode, show, leave],
+  );
 
   const setMode = useCallback((next: ModeId) => {
     if (isReady(next)) setModeState(next);
   }, []);
 
-  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat };
+  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat, removeChat };
 }

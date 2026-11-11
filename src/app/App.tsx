@@ -4,7 +4,8 @@ import { isReady, MODES, type ModeId } from '../core/modes';
 import { missingFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
 import { Conversation } from '../ui/Conversation';
-import { LockIcon, ModeIcon, PlusIcon, RetryIcon } from '../ui/icons';
+import { HistoryDrawer } from '../ui/HistoryDrawer';
+import { MenuIcon, ModeIcon, PlusIcon, RetryIcon } from '../ui/icons';
 import { ModeSheet } from '../ui/ModeSheet';
 import { ParentArea } from '../ui/ParentArea';
 import type { ParentServices } from './parentServices';
@@ -20,7 +21,8 @@ function readSetup(services: Services) {
 }
 
 export function App({ services, parent }: { services: Services; parent: ParentServices }) {
-  const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat } = useChat(services);
+  const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat, removeChat } = useChat(services);
+  const [inHistory, setInHistory] = useState(false);
   const [pickingMode, setPickingMode] = useState(false);
   const [inParentArea, setInParentArea] = useState(false);
   // Read when the app opens and again when the parent area closes; every send reads the
@@ -45,11 +47,11 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
 
   return (
     <div className="screen">
-      {/* While the mode picker is open, nothing behind it can be reached. */}
-      <div className="screen-content" inert={pickingMode}>
+      {/* While the mode picker or the list of chats is open, nothing behind it can be reached. */}
+      <div className="screen-content" inert={pickingMode || inHistory}>
       <header className="top-bar">
-        <button type="button" className="icon-button" aria-label="אזור הורים" onClick={() => setInParentArea(true)}>
-          <LockIcon />
+        <button type="button" className="icon-button" aria-label="השיחות שלי" onClick={() => setInHistory(true)}>
+          <MenuIcon />
         </button>
         <h1 className="top-bar-title">{chat.title}</h1>
         <button type="button" className="icon-button" aria-label="שיחה חדשה" onClick={startNewChat}>
@@ -102,6 +104,20 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
       <Composer mode={mode} writing={writing} blocked={blocked} onSend={send} onStop={stop} onPickMode={() => setPickingMode(true)} />
       </div>
       {pickingMode && <ModeSheet mode={mode} onPick={setMode} onClose={() => setPickingMode(false)} />}
+      {inHistory && (
+        <HistoryDrawer
+          currentId={chat.id}
+          saved={services.store !== null}
+          now={services.now}
+          list={listChats}
+          onOpen={openChat}
+          onRename={renameChat}
+          onRemove={removeChat}
+          onNew={startNewChat}
+          onParentArea={() => setInParentArea(true)}
+          onClose={() => setInHistory(false)}
+        />
+      )}
     </div>
   );
 }
