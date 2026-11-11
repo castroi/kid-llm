@@ -11,11 +11,12 @@ export interface Inline {
 
 export type Block = { kind: 'code'; text: string } | { kind: 'line'; parts: Inline[]; heading: boolean };
 
-const NUMBER = String.raw`[-+]?[\d(][\d.,()]*`;
+/** A number, a number with a letter ("2x"), or a single letter standing for one ("x"). */
+const NUMBER = String.raw`[-+]?(?:[\d(][\d.,()]*[a-zA-Z]?|[a-zA-Z](?![a-zA-Z]))`;
 /** "3/4 + 1/8 = 7/8", "7 ÷ 8 = 0.875", "11/11/2026". */
 const EXPRESSION = String.raw`${NUMBER}(?:\s*[-+*/÷×=<>^]\s*${NUMBER})+%?`;
-/** "-5", "+3", "50%", "12 km", "30°". */
-const SIGNED_OR_UNIT = String.raw`[-+]\d[\d.,]*%?|\d[\d.,]*\s?(?:%|°|[a-zA-Z]+\b)`;
+/** "-5", "+3", "50%", "12 km", "30°", "23 °F". */
+const SIGNED_OR_UNIT = String.raw`[-+]\d[\d.,]*%?|\d[\d.,]*\s?(?:%|°[a-zA-Z]?|[a-zA-Z]+\b)`;
 const INLINE = new RegExp(String.raw`\x60([^\x60\n]+)\x60|\*\*([^*\n]+)\*\*|(https?:\/\/\S+)|(${EXPRESSION}|${SIGNED_OR_UNIT})`, 'g');
 
 /** One line's text, split into plain text, bold, code and left-to-right runs. */
