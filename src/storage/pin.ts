@@ -6,7 +6,8 @@
  *
  * Wrong tries are counted on the phone. After 5 in a row the area locks for a minute, and
  * for twice as long after each further wrong try, up to an hour. Setting the phone's clock
- * forward ends a lock early; it still leaves one try per lock.
+ * forward ends a lock early; it still leaves one try per lock. Codes are checked one at a
+ * time. If the phone refuses to write the count, it is kept in memory until the app closes.
  *
  * If the code is forgotten, clearing the site's data in Safari removes it together with
  * the key and the settings: she can't chat until a parent sets the app up again.
@@ -64,13 +65,17 @@ function readRecord(storage: KeyValue): PinRecord | null {
   return { salt, hash, iterations };
 }
 
+/** The count for a phone that refused to write it: it holds until the app is closed. */
+const unwritten = new WeakMap<KeyValue, Attempts>();
+
 function readAttempts(storage: KeyValue): Attempts {
   const value = readJson(storage, ATTEMPTS_KEY);
   const failed = value?.failed;
   const lockedUntil = value?.lockedUntil;
+  const inMemory = unwritten.get(storage);
   return {
-    failed: typeof failed === 'number' && Number.isInteger(failed) && failed > 0 ? failed : 0,
-    lockedUntil: typeof lockedUntil === 'number' && Number.isFinite(lockedUntil) ? lockedUntil : 0,
+    failed: Math.max(typeof failed === 'number' && Number.isInteger(failed) && failed > 0 ? failed : 0, inMemory?.failed ?? 0),
+    lockedUntil: Math.max(typeof lockedUntil === 'number' && Number.isFinite(lockedUntil) ? lockedUntil : 0, inMemory?.lockedUntil ?? 0),
   };
 }
 
@@ -93,6 +98,7 @@ export async function setPin(pin: string, storage: KeyValue = localStorage, hash
     const record: PinRecord = { salt: toHex(salt), hash: await derive(pin, salt, ITERATIONS, hasher), iterations: ITERATIONS };
     storage.setItem(PIN_KEY, JSON.stringify(record));
     storage.removeItem(ATTEMPTS_KEY);
+    unwritten.delete(storage);
     return true;
   } catch {
     return false;
@@ -106,8 +112,17 @@ export function lockedFor(now: number, storage: KeyValue = localStorage): number
   return Math.max(0, Math.min(lockedUntil - now, MAX_LOCK_MS));
 }
 
+/** Checks wait for the one before them, so tries that start together can't all slip in ahead of the count. */
+let lastCheck: Promise<unknown> = Promise.resolve();
+
 /** Checks a code. A wrong try is counted; `locked` means no check was made at all. */
-export async function checkPin(pin: string, now: number, storage: KeyValue = localStorage, hasher: Hasher = crypto): Promise<PinResult> {
+export function checkPin(pin: string, now: number, storage: KeyValue = localStorage, hasher: Hasher = crypto): Promise<PinResult> {
+  const mine = lastCheck.then(() => checkOne(pin, now, storage, hasher));
+  lastCheck = mine.catch(() => undefined);
+  return mine;
+}
+
+async function checkOne(pin: string, now: number, storage: KeyValue, hasher: Hasher): Promise<PinResult> {
   if (lockedFor(now, storage) > 0) return 'locked';
   const record = readRecord(storage);
   let right = false;
@@ -118,17 +133,24 @@ export async function checkPin(pin: string, now: number, storage: KeyValue = loc
       right = false;
     }
   }
-  try {
-    if (right) {
+  if (right) {
+    unwritten.delete(storage);
+    try {
       storage.removeItem(ATTEMPTS_KEY);
-      return 'ok';
+    } catch {
+      // The old count stays on the phone; the right code still opens.
     }
-    const failed = readAttempts(storage).failed + 1;
-    const wait = lockMs(failed);
-    storage.setItem(ATTEMPTS_KEY, JSON.stringify({ failed, lockedUntil: wait > 0 ? now + wait : 0 }));
-    return wait > 0 ? 'locked' : 'wrong';
-  } catch {
-    // The phone refused to write: the answer is still the truth, the count just isn't kept.
-    return right ? 'ok' : 'wrong';
+    return 'ok';
   }
+  const failed = readAttempts(storage).failed + 1;
+  const wait = lockMs(failed);
+  const attempts: Attempts = { failed, lockedUntil: wait > 0 ? now + wait : 0 };
+  try {
+    storage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts));
+    unwritten.delete(storage);
+  } catch {
+    // The phone refused to write: the count is kept in memory, so the lock still comes.
+    unwritten.set(storage, attempts);
+  }
+  return wait > 0 ? 'locked' : 'wrong';
 }

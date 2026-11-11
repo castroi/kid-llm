@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiError } from '../ai/providers';
 import { fakeParent, type FakePhone } from '../test/fakeParent';
-import { ParentArea } from './ParentArea';
+import { IDLE_CLOSE_MS, ParentArea } from './ParentArea';
 
 const KEY = 'sk-parent-secret';
 
@@ -60,7 +60,39 @@ describe("the parent's code", () => {
     const field = screen.getByLabelText('קוד חדש (4 עד 8 ספרות)') as HTMLInputElement;
     await userEvent.type(field, '1a2-3 4');
     expect(field.value).toBe('1234');
-    expect(field.type).toBe('password');
+  });
+
+  it('shows the code and the key as dots without using a password field, which Safari would offer to save', async () => {
+    await openSettings({ apiKey: KEY });
+    await userEvent.click(screen.getByRole('button', { name: 'שינוי קוד הורים' }));
+    for (const label of ['מפתח API', 'הקוד הנוכחי', 'קוד חדש (4 עד 8 ספרות)', 'שוב, לאימות']) {
+      const field = screen.getByLabelText(label) as HTMLInputElement;
+      expect(field.type, label).toBe('text');
+      expect(field, label).toHaveClass('secret');
+      expect(field.autocomplete, label).toBe('off');
+    }
+    expect(document.querySelector('input[type="password"]')).toBeNull();
+  });
+
+  it('starts from nothing when the code is missing but a key and settings are still on the phone', async () => {
+    const { phone } = open({ apiKey: KEY, settings: { provider: 'venice', models: { chat: 'm', search: '', math: '', draw: '' }, systemPrompt: 'Be kind.', childName: 'נועה', dailyLimit: 5 } });
+    expect(screen.getByText('לא נמצא קוד הורים באייפון הזה. בחירת קוד חדש תמחק את המפתח ואת ההגדרות השמורים.')).toBeInTheDocument();
+    // Nothing is removed until a new code is really chosen.
+    expect(phone.apiKey).toBe(KEY);
+
+    await userEvent.type(screen.getByLabelText('קוד חדש (4 עד 8 ספרות)'), '9999');
+    await userEvent.type(screen.getByLabelText('שוב, לאימות'), '9999');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירת הקוד' }));
+    await screen.findByLabelText('מפתח API');
+    expect(phone.apiKey).toBe('');
+    expect(phone.settings.systemPrompt).toBe('');
+    expect(phone.settings.dailyLimit).toBeNull();
+    expect((screen.getByLabelText('שם הילדה') as HTMLInputElement).value).toBe('');
+  });
+
+  it('gives no such warning on a phone that was never set up', () => {
+    open();
+    expect(screen.queryByText(/לא נמצא קוד הורים/)).not.toBeInTheDocument();
   });
 
   it('keeps the settings closed after a wrong code and opens them with the right one', async () => {
@@ -97,9 +129,37 @@ describe("the parent's code", () => {
     }
   });
 
+  it('does not change the code without the current one', async () => {
+    const { phone } = await openSettings();
+    await userEvent.click(screen.getByRole('button', { name: 'שינוי קוד הורים' }));
+    await userEvent.type(screen.getByLabelText('הקוד הנוכחי'), '0000');
+    await userEvent.type(screen.getByLabelText('קוד חדש (4 עד 8 ספרות)'), '135790');
+    await userEvent.type(screen.getByLabelText('שוב, לאימות'), '135790');
+    await userEvent.click(screen.getByRole('button', { name: 'החלפת הקוד' }));
+    expect(await screen.findByText('הקוד הנוכחי שגוי.')).toBeInTheDocument();
+    expect(phone.pin).toBe('2468');
+  });
+
+  describe('left open', () => {
+    afterEach(() => vi.useRealTimers());
+
+    it('closes after a few minutes with no touch, and a touch starts the wait again', () => {
+      vi.useFakeTimers();
+      const { onClose } = open({ pin: '2468' });
+      vi.advanceTimersByTime(IDLE_CLOSE_MS - 1000);
+      expect(onClose).not.toHaveBeenCalled();
+      fireEvent.pointerDown(screen.getByLabelText('קוד הורים'));
+      vi.advanceTimersByTime(IDLE_CLOSE_MS - 1000);
+      expect(onClose).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1000);
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('lets the parent change the code', async () => {
     const { phone } = await openSettings();
     await userEvent.click(screen.getByRole('button', { name: 'שינוי קוד הורים' }));
+    await userEvent.type(screen.getByLabelText('הקוד הנוכחי'), '2468');
     await userEvent.type(screen.getByLabelText('קוד חדש (4 עד 8 ספרות)'), '135790');
     await userEvent.type(screen.getByLabelText('שוב, לאימות'), '135790');
     await userEvent.click(screen.getByRole('button', { name: 'החלפת הקוד' }));
@@ -113,7 +173,6 @@ describe('the API key', () => {
     await openSettings({ apiKey: KEY });
     const field = screen.getByLabelText('מפתח API') as HTMLInputElement;
     expect(field.value).toBe('');
-    expect(field.type).toBe('password');
     expect(field.placeholder).toBe('מפתח שמור. הקלדה תחליף אותו');
     expect(document.body.innerHTML).not.toContain(KEY);
   });
@@ -161,6 +220,26 @@ describe('the API key', () => {
     await userEvent.click(screen.getByRole('button', { name: 'בדיקת חיבור' }));
     expect(await screen.findByText('נגמרה היתרה בחשבון אצל הספק.')).toBeInTheDocument();
     expect(screen.getByText('402 Insufficient balance')).toBeInTheDocument();
+  });
+
+  it("keeps the provider's message on the screen only: nothing is stored, and it is gone when the area is opened again", async () => {
+    localStorage.clear();
+    sessionStorage.clear();
+    const { parent } = fakeParent({ pin: '2468', apiKey: KEY }, () => Promise.reject(new AiError('unauthorized', '401 key rejected for this request')));
+    const first = render(<ParentArea parent={parent} onClose={() => undefined} onChatsDeleted={() => undefined} />);
+    await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
+    await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'בדיקת חיבור' }));
+    expect(await screen.findByText('401 key rejected for this request')).toBeInTheDocument();
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+
+    first.unmount();
+    render(<ParentArea parent={parent} onClose={() => undefined} onChatsDeleted={() => undefined} />);
+    await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
+    await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
+    await screen.findByLabelText('מפתח API');
+    expect(screen.queryByText('401 key rejected for this request')).not.toBeInTheDocument();
   });
 
   it('survives a check that fails in an unexpected way', async () => {

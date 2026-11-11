@@ -108,3 +108,20 @@ export function missingFor(mode: ModeId, settings: Settings, apiKey: string): 'k
   if (!settings.models[mode]) return 'model';
   return null;
 }
+
+/** A key, or settings other than the defaults, are saved on this phone. */
+export function hasSetup(storage: KeyValue = localStorage): boolean {
+  const fresh = JSON.stringify(sanitizeSettings(DEFAULT_SETTINGS));
+  return Object.keys(AI_PROVIDERS).some((provider) => loadApiKey(provider as AiProviderId, storage) !== '') || JSON.stringify(loadSettings(storage)) !== fresh;
+}
+
+/** Removes every saved key and the settings. Returns false when the browser refused. */
+export function forgetSetup(storage: KeyValue = localStorage): boolean {
+  try {
+    for (const provider of Object.keys(AI_PROVIDERS)) storage.removeItem(apiKeyEntry(provider as AiProviderId));
+    storage.removeItem(SETTINGS_KEY);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -15,6 +15,10 @@ export interface ParentServices {
   saveApiKey: (provider: AiProviderId, apiKey: string) => boolean;
   /** Checks the typed key, or the saved one when nothing was typed. Rejects with an AiError. */
   checkConnection: (provider: AiProviderId, typedKey: string) => Promise<string | null>;
+  /** A key or settings other than the defaults are saved on the phone. */
+  hasSetup: () => boolean;
+  /** Removes the saved key and puts the settings back to the defaults. False when the phone refused. */
+  forgetSetup: () => boolean;
   hasPin: () => boolean;
   setPin: (pin: string) => Promise<boolean>;
   checkPin: (pin: string) => Promise<PinResult>;

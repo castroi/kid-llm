@@ -539,6 +539,11 @@ button:disabled {
   border-radius: 12px;
 }
 
+/* Typed characters shown as dots, without being a password field Safari would offer to save. */
+.secret {
+  -webkit-text-security: disc;
+}
+
 textarea.input {
   line-height: 1.5;
   resize: vertical;
