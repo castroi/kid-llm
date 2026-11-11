@@ -14,6 +14,8 @@
   /* A send button with nothing to send: white on it is still 4.6:1. */
   --disabled: #6f7588;
   --scrim: rgba(26, 29, 46, 0.45);
+  /* Delete buttons and warnings: 6.6:1 on white. */
+  --danger: #b42318;
   color-scheme: light;
 }
 
@@ -463,4 +465,155 @@ button:disabled {
   color: var(--on-accent);
   background: var(--accent);
   border-radius: 14px;
+}
+
+/* Parent area */
+.parent {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.parent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 16px 24px;
+}
+
+.text-button {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 8px;
+  font-weight: 500;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  border-radius: 14px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* 17px: under 16px Safari zooms the page when a field is tapped. */
+.input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 17px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+textarea.input {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.hint {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.button {
+  min-height: 48px;
+  padding: 0 16px;
+  font-size: 16px;
+  font-weight: 500;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.button.primary {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.button.danger {
+  color: var(--danger);
+  background: var(--surface);
+  border-color: var(--danger);
+}
+
+.button:disabled {
+  color: var(--on-accent);
+  background: var(--disabled);
+  border-color: var(--disabled);
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.status {
+  margin: 0;
+  font-size: 15px;
+}
+
+.status:empty {
+  display: none;
+}
+
+.status p {
+  margin: 0;
+}
+
+/* The provider's own words, which may be English inside the Hebrew screen. */
+.detail {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirm p {
+  margin: 0;
 }

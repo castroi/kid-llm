@@ -1,36 +1,56 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
 import { missingFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
 import { Conversation } from '../ui/Conversation';
-import { ModeIcon, PlusIcon, RetryIcon } from '../ui/icons';
+import { LockIcon, ModeIcon, PlusIcon, RetryIcon } from '../ui/icons';
 import { ModeSheet } from '../ui/ModeSheet';
+import { ParentArea } from '../ui/ParentArea';
+import type { ParentServices } from './parentServices';
 import { useChat, type Services } from './useChat';
 
 /** The chat screen: the opening with the modes, then the conversation, with the composer below. */
-export function App({ services }: { services: Services }) {
+/** What the screen needs to know about the setup: her name and which modes are ready, never the key itself. */
+function readSetup(services: Services) {
+  const settings = services.loadSettings();
+  const apiKey = services.loadApiKey(settings.provider);
+  const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
+  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[] };
+}
+
+export function App({ services, parent }: { services: Services; parent: ParentServices }) {
   const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat } = useChat(services);
   const [pickingMode, setPickingMode] = useState(false);
-  // Read once for the screen; every send reads the settings again, so a change takes effect at once.
-  // Only what the screen shows is kept: her name and which modes are set up, never the key itself.
-  const [setup] = useState(() => {
-    const settings = services.loadSettings();
-    const apiKey = services.loadApiKey(settings.provider);
-    const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
-    return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[] };
-  });
+  const [inParentArea, setInParentArea] = useState(false);
+  // Read when the app opens and again when the parent area closes; every send reads the
+  // settings itself, so a change takes effect at once.
+  const [setup, setSetup] = useState(() => readSetup(services));
+  const closeParentArea = useCallback(() => {
+    setSetup(readSetup(services));
+    setInParentArea(false);
+  }, [services]);
 
   const blocked = setup.notSetUp.includes(mode);
   const empty = chat.messages.length === 0;
   const error = notice?.kind === 'error' ? kidMessage(notice.reason) : null;
+
+  if (inParentArea) {
+    return (
+      <div className="screen">
+        <ParentArea parent={parent} onClose={closeParentArea} onChatsDeleted={startNewChat} />
+      </div>
+    );
+  }
 
   return (
     <div className="screen">
       {/* While the mode picker is open, nothing behind it can be reached. */}
       <div className="screen-content" inert={pickingMode}>
       <header className="top-bar">
-        <span className="top-bar-side" />
+        <button type="button" className="icon-button" aria-label="אזור הורים" onClick={() => setInParentArea(true)}>
+          <LockIcon />
+        </button>
         <h1 className="top-bar-title">{chat.title}</h1>
         <button type="button" className="icon-button" aria-label="שיחה חדשה" onClick={startNewChat}>
           <PlusIcon />
