@@ -104,8 +104,17 @@ describe('toProviderMessages with records it cannot trust', () => {
     // Already answered: sending it again would be a second paid call for the same question.
     expect(toProviderMessages([message('user', 'א'), message('assistant', 'ב')])).toEqual([]);
     expect(toProviderMessages([message('user', 'א'), message('assistant', 'ב'), message('user', '   ')])).toEqual([]);
+    expect(toProviderMessages([message('user', 'א'), message('assistant', 'חצי', { state: 'stopped' })])).toEqual([]);
     expect(toProviderMessages([message('assistant', 'ב')])).toEqual([]);
     expect(toProviderMessages([message('user', '   ')])).toEqual([]);
+  });
+
+  it('still sends her question after an answer that failed or has no text yet', () => {
+    const question = [{ role: 'user', content: 'א' }];
+    expect(toProviderMessages([message('user', 'א'), message('assistant', 'חצי', { state: 'failed' })])).toEqual(question);
+    expect(toProviderMessages([message('user', 'א'), message('assistant', '', { state: 'failed' })])).toEqual(question);
+    // The empty answer that is on the screen while the real one is being written.
+    expect(toProviderMessages([message('user', 'א'), message('assistant', '')])).toEqual(question);
     expect(toProviderMessages([])).toEqual([]);
   });
 
