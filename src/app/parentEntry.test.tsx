@@ -41,13 +41,14 @@ function openApp(options: { store?: ChatStore; send?: (request: ChatRequest) => 
   return { phone, requests };
 }
 
-/** The way in. */
+/** The way in: the list of chats, then the button at its bottom. */
 async function openParentArea() {
+  await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
   await userEvent.click(screen.getByRole('button', { name: 'אזור הורים' }));
 }
 
 describe('the way into the parent area', () => {
-  it('opens from the lock in the top bar and asks for a code first', async () => {
+  it('opens from the bottom of the list of chats and asks for a code first', async () => {
     openApp();
     await openParentArea();
     expect(screen.getByRole('heading', { name: 'אזור הורים' })).toBeInTheDocument();

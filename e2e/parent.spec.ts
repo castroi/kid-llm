@@ -9,6 +9,7 @@ test('a parent chooses a code and sets the chat up; then she can write, and the 
   await page.goto('/');
   await expect(page.getByText("הצ'אט עוד לא מוכן. צריך שאבא או אמא יגדירו אותו.")).toBeVisible();
 
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
   await page.getByRole('button', { name: 'אזור הורים' }).tap();
   await page.getByLabel('קוד חדש (4 עד 8 ספרות)').fill('2468');
   await page.getByLabel('שוב, לאימות').fill('2468');
@@ -36,6 +37,7 @@ test('a parent chooses a code and sets the chat up; then she can write, and the 
   await expect(page.getByRole('button', { name: 'שליחה' })).toBeEnabled();
 
   // Back in: the code is asked for, a wrong one keeps the settings closed, and the key is never shown.
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
   await page.getByRole('button', { name: 'אזור הורים' }).tap();
   await page.getByLabel('קוד הורים', { exact: true }).fill('1111');
   await page.getByRole('button', { name: 'כניסה' }).tap();
@@ -50,6 +52,7 @@ test('a parent chooses a code and sets the chat up; then she can write, and the 
 
 test('the parent area fits the phone: fields do not make Safari zoom, buttons are big enough, nothing sticks out', async ({ page }) => {
   await page.goto('/');
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
   await page.getByRole('button', { name: 'אזור הורים' }).tap();
   await page.getByLabel('קוד חדש (4 עד 8 ספרות)').fill('2468');
   await page.getByLabel('שוב, לאימות').fill('2468');
@@ -116,6 +119,7 @@ test('"delete all chats" really empties the phone\'s database', async ({ page })
   );
   expect(await chatsOnPhone(page)).toBe(1);
 
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
   await page.getByRole('button', { name: 'אזור הורים' }).tap();
   await page.getByLabel('קוד חדש (4 עד 8 ספרות)').fill('2468');
   await page.getByLabel('שוב, לאימות').fill('2468');

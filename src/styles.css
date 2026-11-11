@@ -622,3 +622,101 @@ textarea.input {
 .confirm p {
   margin: 0;
 }
+
+/* The list of chats: slides in from the side the text starts on (the right, in Hebrew). */
+.drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(330px, 86vw);
+  height: 100%;
+  padding: calc(8px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
+  background: var(--surface);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.button.with-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.drawer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.drawer-day {
+  margin: 0;
+  padding: 10px 6px 4px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.drawer-chats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drawer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drawer-chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 10px;
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: 14px;
+}
+
+.drawer-chat[aria-current='true'] {
+  background: var(--accent-tint);
+}
+
+.drawer-chat-icon {
+  flex: none;
+  display: flex;
+  color: var(--accent);
+}
+
+.drawer-chat-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-actions {
+  padding: 4px 6px 12px;
+}
