@@ -7,6 +7,7 @@ import { MAX_MESSAGE_CHARS, type Chat } from '../core/chat';
 import { LIMIT_MESSAGE, NOT_SAVED_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import type { ChatStore } from '../storage/chatStore';
 import type { Settings } from '../storage/settings';
+import { fakeParent } from '../test/fakeParent';
 import { App } from './App';
 import type { Services } from './useChat';
 
@@ -92,7 +93,7 @@ function open(options: Options = {}) {
     newId: () => `id-${++id}`,
     copyText,
   };
-  render(<App services={services} />);
+  render(<App services={services} parent={fakeParent().parent} />);
   return { requests, store, copyText, sentNow: () => sent };
 }
 
