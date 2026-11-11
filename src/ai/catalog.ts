@@ -16,6 +16,8 @@ export interface AiProvider {
     check: string;
     /** Makes one picture from a text. */
     image: string;
+    /** The provider's list of models, for the parent's picker. */
+    models: string;
   };
 }
 
@@ -27,6 +29,7 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProvider> = {
       chat: 'https://api.venice.ai/api/v1/chat/completions',
       check: 'https://api.venice.ai/api/v1/api_keys/rate_limits',
       image: 'https://api.venice.ai/api/v1/image/generate',
+      models: 'https://api.venice.ai/api/v1/models',
     },
   },
 };

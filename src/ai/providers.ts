@@ -7,7 +7,8 @@ import { LineTooLongError, sseData } from './sse';
  * shared in src/ai/send.ts, so a new provider only describes its own request and response.
  * Adapted from kid-closet's src/ai/providers.ts.
  * Docs: Venice https://docs.venice.ai/api-reference/endpoint/chat/completions
- *       and https://docs.venice.ai/api-reference/endpoint/image/generate
+ *       https://docs.venice.ai/api-reference/endpoint/image/generate
+ *       https://docs.venice.ai/api-reference/endpoint/models/list
  */
 
 /** Why a call failed. The kid sees one friendly line; the parent area shows the reason. */
@@ -91,13 +92,39 @@ export interface ImageCall {
   fetch: FetchLike;
 }
 
+/** One model the parent can pick for a mode. */
+export interface ModelInfo {
+  /** What is sent to the provider as `model`. */
+  id: string;
+  /** The provider's display name. */
+  name: string;
+  /** `private`: the provider keeps nothing. `anonymized`: the model's own company sees the text, not who sent it. */
+  privacy: 'private' | 'anonymized' | 'unknown';
+  /** Can search the web (text models only). */
+  webSearch: boolean;
+}
+
+export type ModelKind = 'text' | 'image';
+
+/** The list is a few hundred short entries; more than this is not downloaded or shown. */
+export const MAX_MODELS_BODY_CHARS = 2 * 1024 * 1024;
+export const MAX_MODELS = 300;
+
 export interface ProviderAdapter {
   streamChat(call: ChatCall): Promise<ChatResult>;
   /** Makes one picture. A picture the provider blurred or flagged is a refusal, never shown. */
   generateImage(call: ImageCall): Promise<GeneratedImage>;
+  /**
+   * The models of one kind that a child's chat may use: models the provider classes as
+   * uncensored, and models that are offline, are left out.
+   */
+  listModels(call: { kind: ModelKind; apiKey: string; signal: AbortSignal; fetch: FetchLike }): Promise<ModelInfo[]>;
   /** Resolves when the key works; the text, if any, is shown to the parent. */
   checkKey(call: { apiKey: string; signal: AbortSignal; fetch: FetchLike }): Promise<string | null>;
 }
+
+/** The longest model id taken from a list; the same limit as a typed one (src/storage/settings.ts). */
+export const MAX_MODEL_ID_CHARS = 200;
 
 /** Far above any real answer; stops a runaway stream from filling the phone's memory. */
 export const MAX_ANSWER_CHARS = 200_000;
@@ -315,6 +342,37 @@ const venice: ProviderAdapter = {
     }
     if (bytes.byteLength === 0) throw new AiError('bad-response', 'empty picture');
     return { type: type as ImageType, bytes };
+  },
+  async listModels({ kind, apiKey, signal, fetch }) {
+    const response = await call(fetch, `${AI_PROVIDERS.venice.endpoints.models}?type=${kind}`, { method: 'GET', headers: headers(apiKey, false), signal });
+    if (!response.ok) throw await failure(response, apiKey);
+    let listed: unknown;
+    try {
+      const text = await readLimitedText(response, MAX_MODELS_BODY_CHARS);
+      if (text.length > MAX_MODELS_BODY_CHARS) throw new AiError('bad-response', 'model list too long');
+      listed = (JSON.parse(text) as { data?: unknown })?.data;
+    } catch (err) {
+      if (err instanceof AiError || signal.aborted) throw err; // send.ts tells a timeout from a stop
+      throw new AiError('bad-response', 'model list unreadable');
+    }
+    if (!Array.isArray(listed)) throw new AiError('bad-response', 'no model list');
+    const models: ModelInfo[] = [];
+    for (const item of listed) {
+      if (models.length >= MAX_MODELS) break;
+      if (!item || typeof item !== 'object') continue;
+      const { id, type, model_spec: spec } = item as { id?: unknown; type?: unknown; model_spec?: Record<string, unknown> | null };
+      if (typeof id !== 'string' || !id || id.length > MAX_MODEL_ID_CHARS || type !== kind) continue;
+      // Venice marks a model with minimal content filtering as `uncensored`; not for a child.
+      if (spec?.uncensored === true || spec?.offline === true) continue;
+      const capabilities = spec?.capabilities as Record<string, unknown> | null | undefined;
+      models.push({
+        id,
+        name: typeof spec?.name === 'string' && spec.name.trim() ? spec.name.trim().slice(0, 80) : id,
+        privacy: spec?.privacy === 'private' || spec?.privacy === 'anonymized' ? spec.privacy : 'unknown',
+        webSearch: capabilities?.supportsWebSearch === true,
+      });
+    }
+    return models;
   },
   async checkKey({ apiKey, signal, fetch }) {
     const response = await call(fetch, AI_PROVIDERS.venice.endpoints.check, { method: 'GET', headers: headers(apiKey, false), signal });

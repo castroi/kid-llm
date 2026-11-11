@@ -1,6 +1,6 @@
 import { imagePromptFor, systemPromptFor } from './baseline';
 import type { AiProviderId } from './catalog';
-import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, type GeneratedImage } from './providers';
+import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, type GeneratedImage, type ModelInfo, type ModelKind } from './providers';
 
 /**
  * The only way the app calls a provider. It applies the timeout, tells her "עצירה" from
@@ -167,5 +167,20 @@ export function checkConnection(
 ): Promise<string | null> {
   return withDeadline(options.signal, options.timeoutMs ?? CHECK_TIMEOUT_MS, async (signal) =>
     ADAPTERS[provider].checkKey({ apiKey: usableKey(apiKey), signal, fetch: options.fetch ?? defaultFetch }),
+  );
+}
+
+/**
+ * The provider's models of one kind, for the parent's picker, without the ones the provider
+ * classes as uncensored. Rejects with an AiError.
+ */
+export function listModels(
+  provider: AiProviderId,
+  kind: ModelKind,
+  apiKey: string,
+  options: { signal?: AbortSignal; fetch?: FetchLike; timeoutMs?: number } = {},
+): Promise<ModelInfo[]> {
+  return withDeadline(options.signal, options.timeoutMs ?? CHECK_TIMEOUT_MS, async (signal) =>
+    ADAPTERS[provider].listModels({ kind, apiKey: usableKey(apiKey), signal, fetch: options.fetch ?? defaultFetch }),
   );
 }

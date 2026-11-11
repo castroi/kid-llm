@@ -1,4 +1,5 @@
 import type { AiProviderId } from '../ai/catalog';
+import type { ModelInfo, ModelKind } from '../ai/providers';
 import type { PinResult } from '../storage/pin';
 import type { Settings } from '../storage/settings';
 
@@ -15,6 +16,8 @@ export interface ParentServices {
   saveApiKey: (provider: AiProviderId, apiKey: string) => boolean;
   /** Checks the typed key, or the saved one when nothing was typed. Rejects with an AiError. */
   checkConnection: (provider: AiProviderId, typedKey: string) => Promise<string | null>;
+  /** The provider's models of one kind, with the typed key or the saved one. Rejects with an AiError. */
+  listModels: (provider: AiProviderId, kind: ModelKind, typedKey: string) => Promise<ModelInfo[]>;
   /** A key or settings other than the defaults are saved on the phone. */
   hasSetup: () => boolean;
   /** Removes the saved key and puts the settings back to the defaults. False when the phone refused. */

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
-import { AiError } from '../ai/providers';
+import { AiError, type ModelInfo, type ModelKind } from '../ai/providers';
 import type { ParentServices } from '../app/parentServices';
-import { isReady, MODES } from '../core/modes';
+import { isReady, MODES, type ModeId } from '../core/modes';
 import { parentMessage, waitText } from '../core/parentMessages';
 import { PIN_PATTERN, type PinResult } from '../storage/pin';
 import { MAX_DAILY_LIMIT, MAX_MODEL_CHARS, MAX_NAME_CHARS, MAX_SYSTEM_PROMPT_CHARS, type Settings } from '../storage/settings';
@@ -190,6 +190,16 @@ function EnterCode({ parent, onRight }: { parent: ParentServices; onRight: () =>
   );
 }
 
+type Listed = { state: 'idle' } | { state: 'loading' } | { state: 'ready'; models: Record<ModelKind, ModelInfo[]> } | { state: 'failed'; text: string; detail: string };
+
+const PRIVACY_LABEL: Record<ModelInfo['privacy'], string> = { private: ' · פרטי', anonymized: ' · אנונימי', unknown: '' };
+
+/** The models a mode can use: image models for drawing, text models that can search for search, any text model otherwise. */
+function modelsFor(mode: ModeId, models: Record<ModelKind, ModelInfo[]>): ModelInfo[] {
+  const fitting = mode === 'draw' ? models.image : mode === 'search' ? models.text.filter((m) => m.webSearch) : models.text;
+  return [...fitting].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 type Check = { state: 'idle' } | { state: 'checking' } | { state: 'ok'; note: string | null } | { state: 'failed'; text: string; detail: string };
 
 function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServices; onChatsDeleted: () => void; onLocked: () => void }) {
@@ -199,6 +209,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
   const [keyText, setKeyText] = useState('');
   const [keySaved, setKeySaved] = useState(() => parent.hasApiKey(draft.provider));
   const [check, setCheck] = useState<Check>({ state: 'idle' });
+  const [listed, setListed] = useState<Listed>({ state: 'idle' });
   const [saveStatus, setSaveStatus] = useState('');
   const [sent, setSent] = useState(() => parent.sentToday());
   const [dataStatus, setDataStatus] = useState('');
@@ -220,6 +231,18 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
       // The provider's own message is shown here only; it is never saved anywhere.
       const failed = err instanceof AiError ? err : new AiError('bad-response');
       setCheck({ state: 'failed', text: parentMessage(failed.reason), detail: failed.detail });
+    }
+  };
+
+  const loadModels = async () => {
+    if (!keyText.trim() && !keySaved) return setListed({ state: 'failed', text: 'צריך להזין מפתח קודם.', detail: '' });
+    setListed({ state: 'loading' });
+    try {
+      const [text, image] = await Promise.all([parent.listModels(provider, 'text', keyText), parent.listModels(provider, 'image', keyText)]);
+      setListed({ state: 'ready', models: { text, image } });
+    } catch (err) {
+      const failed = err instanceof AiError ? err : new AiError('bad-response');
+      setListed({ state: 'failed', text: parentMessage(failed.reason), detail: failed.detail });
     }
   };
 
@@ -272,6 +295,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
                 setKeyText('');
                 setKeySaved(parent.hasApiKey(next));
                 setCheck({ state: 'idle' });
+                setListed({ state: 'idle' });
               }}
             >
               {Object.entries(AI_PROVIDERS).map(([id, info]) => (
@@ -329,27 +353,68 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
 
         <section className="card">
           <h2 className="card-title">איזה מודל מאחורי כל מצב</h2>
-          {MODES.filter((m) => isReady(m.id)).map((m) => (
-            <div className="field" key={m.id}>
-              <label htmlFor={`model-${m.id}`}>מודל למצב "{m.name}"</label>
-              <input
-                id={`model-${m.id}`}
-                className="input"
-                type="text"
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                dir="ltr"
-                maxLength={MAX_MODEL_CHARS}
-                value={draft.models[m.id]}
-                onChange={(event) => change({ models: { ...draft.models, [m.id]: event.target.value } })}
-              />
-            </div>
-          ))}
-          <p className="hint">שם המודל כפי שהוא מופיע אצל הספק. הילדה רואה רק את שם המצב. כדאי לבחור רק מודלים עם סינון תוכן.</p>
+          <div className="button-row">
+            <button type="button" className="button" disabled={listed.state === 'loading'} onClick={() => void loadModels()}>
+              טעינת רשימת המודלים מהספק
+            </button>
+          </div>
+          <div className="status" role="status">
+            {listed.state === 'loading' && <p>טוען...</p>}
+            {listed.state === 'ready' && <p>הרשימה נטענה. אפשר לבחור מודל לכל מצב.</p>}
+            {listed.state === 'failed' && (
+              <>
+                <p>{listed.text}</p>
+                {listed.detail && (
+                  <p className="detail" dir="auto">
+                    {listed.detail}
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+          {MODES.filter((m) => isReady(m.id)).map((m) => {
+            const chosen = draft.models[m.id];
+            const setModel = (value: string) => change({ models: { ...draft.models, [m.id]: value } });
+            const options = listed.state === 'ready' ? modelsFor(m.id, listed.models) : null;
+            return (
+              <div className="field" key={m.id}>
+                <label htmlFor={`model-${m.id}`}>מודל למצב "{m.name}"</label>
+                {options ? (
+                  <select id={`model-${m.id}`} className="input" dir="ltr" value={chosen} onChange={(event) => setModel(event.target.value)}>
+                    <option value="">לא נבחר (המצב כבוי)</option>
+                    {/* A saved model the list doesn't offer stays chosen until the parent picks another. */}
+                    {chosen && !options.some((o) => o.id === chosen) && <option value={chosen}>{chosen} (לא ברשימה)</option>}
+                    {options.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                        {PRIVACY_LABEL[o.privacy]}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    id={`model-${m.id}`}
+                    className="input"
+                    type="text"
+                    autoComplete="off"
+                    autoCapitalize="off"
+                    autoCorrect="off"
+                    spellCheck={false}
+                    dir="ltr"
+                    maxLength={MAX_MODEL_CHARS}
+                    value={chosen}
+                    onChange={(event) => setModel(event.target.value)}
+                  />
+                )}
+              </div>
+            );
+          })}
+          {listed.state === 'ready' && (
+            <p className="hint">פרטי: הספק לא שומר את הטקסט. אנונימי: החברה שמאחורי המודל רואה את הטקסט, בלי לדעת מי שלח. מודלים שהספק מסמן כלא מסוננים לא מופיעים ברשימה.</p>
+          )}
+          <p className="hint">אפשר גם להקליד את שם המודל כפי שהוא מופיע אצל הספק. הילדה רואה רק את שם המצב. מצב בלי מודל לא זמין לה.</p>
           <p className="hint">במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים. התמונות נשמרות רק באייפון הזה.</p>
-          <p className="hint">במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש. מצב בלי שם מודל לא יהיה זמין לה.</p>
+          <p className="hint">במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש.</p>
         </section>
 
         <section className="card">

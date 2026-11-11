@@ -1,6 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { checkConnection, generateImage, sendChat } from './ai/send';
+import { checkConnection, generateImage, listModels, sendChat } from './ai/send';
 import { App } from './app/App';
 import type { ParentServices } from './app/parentServices';
 import type { Services } from './app/useChat';
@@ -34,6 +34,7 @@ function browserParentServices(store: ChatStore | null): ParentServices {
     hasApiKey: (provider) => loadApiKey(provider) !== '',
     saveApiKey: (provider, apiKey) => saveApiKey(provider, apiKey),
     checkConnection: (provider, typedKey) => checkConnection(provider, typedKey.trim() || loadApiKey(provider)),
+    listModels: (provider, kind, typedKey) => listModels(provider, kind, typedKey.trim() || loadApiKey(provider)),
     hasSetup: () => hasSetup(),
     forgetSetup: () => forgetSetup(),
     hasPin: () => hasPin(),
