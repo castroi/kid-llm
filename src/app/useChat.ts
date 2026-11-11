@@ -125,6 +125,7 @@ export function useChat(services: Services): ChatController {
           systemPrompt: settings.systemPrompt,
           messages: toProviderMessages(base.messages),
           apiKey,
+          webSearch: forMode === 'search',
           signal: controller.signal,
           onDelta: (piece) => {
             // Another answer to the same message counts toward the day only once it really arrives.

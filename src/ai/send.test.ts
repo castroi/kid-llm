@@ -137,6 +137,16 @@ describe('sendChat', () => {
     expect(BASELINE_PROMPT).not.toMatch(/\d|\b(she|her|girl|boy|he|his|him)\b/i);
   });
 
+  it('asks the provider to search the web only in search mode', async () => {
+    const search = fetchStream([piece('מצאתי'), DONE]);
+    await sendChat(request(search.fetch, { webSearch: true }));
+    expect(JSON.parse(search.calls[0].init.body as string).venice_parameters).toEqual({ include_venice_system_prompt: false, enable_web_search: 'on' });
+
+    const plain = fetchStream([piece('היי'), DONE]);
+    await sendChat(request(plain.fetch));
+    expect(JSON.parse(plain.calls[0].init.body as string).venice_parameters).toEqual({ include_venice_system_prompt: false });
+  });
+
   it('never follows a redirect, sends no cookies or referrer, and keeps nothing in the HTTP cache', async () => {
     const { fetch, calls } = fetchStream([piece('היי'), DONE]);
     await sendChat(request(fetch));

@@ -88,6 +88,8 @@ export interface ChatRequest {
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
   apiKey: string;
+  /** Search mode: look the question up on the web first. Her question then also reaches a search engine, through the provider. */
+  webSearch?: boolean;
   /** Called with each piece of the answer as it arrives, so she sees it being written. */
   onDelta: (text: string) => void;
   /** Her "עצירה". The pieces already given to onDelta stay hers to keep. */
@@ -110,6 +112,7 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
       systemPrompt: systemPromptFor(req.systemPrompt),
       messages: req.messages,
       apiKey,
+      webSearch: req.webSearch === true,
       signal,
       fetch: req.fetch ?? defaultFetch,
       onDelta: (text) => {
