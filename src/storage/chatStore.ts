@@ -15,11 +15,15 @@ export interface ChatStore {
   save(chat: Chat): Promise<void>;
   /**
    * Replaces the chat only if it is still on the phone, and says whether it was. For the
-   * end of an answer: if she (or a parent) deleted the chat meanwhile, it must not come back.
+   * end of an answer: if a parent deleted the chats meanwhile, it must not come back.
    */
   update(chat: Chat): Promise<boolean>;
-  remove(id: string): Promise<void>;
-  /** Deletes every chat ("מחיקת כל השיחות"). */
+  /**
+   * Gives a chat another name and changes nothing else, in one step: a save of its messages
+   * that lands just before or after can't be lost. Says whether the chat was there.
+   */
+  rename(id: string, title: string): Promise<boolean>;
+  /** Deletes every chat ("מחיקת כל השיחות" in the parent area). There is no deleting one chat: she can't, by design. */
   clear(): Promise<void>;
   close(): void;
 }
@@ -107,7 +111,21 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
   return {
     all,
     async list() {
-      return (await all()).map(summary).sort((a, b) => b.updatedAt - a.updatedAt);
+      // One record at a time, keeping only its summary: the pictures inside the chats are
+      // never all in memory together just to show the list.
+      const summaries: ChatSummary[] = [];
+      const tx = db.transaction(CHATS, 'readonly');
+      const done = finished(tx);
+      const walk = tx.objectStore(CHATS).openCursor();
+      walk.onsuccess = () => {
+        const cursor = walk.result;
+        if (!cursor) return;
+        const chat = sanitizeChat(cursor.value);
+        if (chat) summaries.push(summary(chat));
+        cursor.continue();
+      };
+      await done;
+      return summaries.sort((a, b) => b.updatedAt - a.updatedAt);
     },
     async get(id) {
       return sanitizeChat(await read<unknown>((store) => store.get(id))) ?? undefined;
@@ -125,7 +143,19 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
       });
       return found;
     },
-    remove: (id) => write((store) => store.delete(id)),
+    async rename(id, title) {
+      let found = false;
+      // Read and written in one transaction, so no other save can land in between.
+      await write((store) => {
+        const existing = store.get(id);
+        existing.onsuccess = () => {
+          const chat = sanitizeChat(existing.result);
+          found = chat !== null;
+          if (chat) store.put({ ...chat, title });
+        };
+      });
+      return found;
+    },
     clear: () => write((store) => store.clear()),
     close: () => db.close(),
   };

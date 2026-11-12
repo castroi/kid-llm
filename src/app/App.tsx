@@ -1,41 +1,96 @@
-import { useState } from 'react';
-import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { canAttachIn } from '../core/attachment';
+import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
 import { missingFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
 import { Conversation } from '../ui/Conversation';
-import { ModeIcon, PlusIcon, RetryIcon } from '../ui/icons';
+import { HistoryDrawer } from '../ui/HistoryDrawer';
+import { MenuIcon, ModeIcon, PlusIcon, RetryIcon } from '../ui/icons';
 import { ModeSheet } from '../ui/ModeSheet';
+import { ParentArea } from '../ui/ParentArea';
+import type { ParentServices } from './parentServices';
 import { useChat, type Services } from './useChat';
 
 /** The chat screen: the opening with the modes, then the conversation, with the composer below. */
-export function App({ services }: { services: Services }) {
-  const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat } = useChat(services);
+/** What the screen needs to know about the setup: her name and which modes are ready, never the key itself. */
+function readSetup(services: Services) {
+  const settings = services.loadSettings();
+  const apiKey = services.loadApiKey(settings.provider);
+  const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
+  // She can attach a file only once the parent chose a model for files.
+  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && Boolean(settings.fileModel), parentUse: settings.parentUse === true };
+}
+
+export function App({ services, parent }: { services: Services; parent: ParentServices }) {
+  const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat } = useChat(services);
+  const [inHistory, setInHistory] = useState(false);
   const [pickingMode, setPickingMode] = useState(false);
-  // Read once for the screen; every send reads the settings again, so a change takes effect at once.
-  // Only what the screen shows is kept: her name and which modes are set up, never the key itself.
-  const [setup] = useState(() => {
-    const settings = services.loadSettings();
-    const apiKey = services.loadApiKey(settings.provider);
-    const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
-    return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[] };
-  });
+  const [inParentArea, setInParentArea] = useState(false);
+  // Read when the app opens and again when the parent area closes; every send reads the
+  // settings itself, so a change takes effect at once.
+  const [setup, setSetup] = useState(() => readSetup(services));
+  // Whose hands the app is in, as the screen last knew it.
+  const parentUse = useRef(setup.parentUse);
+  const refreshSetup = useCallback(() => {
+    const next = readSetup(services);
+    // The app changed hands (her use, or a parent's own): the chat on the screen is not carried
+    // over. She doesn't get a parent's chat to read or continue, and a parent starts a new one.
+    if (next.parentUse !== parentUse.current) {
+      parentUse.current = next.parentUse;
+      startNewChat();
+    }
+    setSetup(next);
+  }, [services, startNewChat]);
+  const closeParentArea = useCallback(() => {
+    refreshSetup();
+    setInParentArea(false);
+  }, [refreshSetup]);
+  // The settings can also change outside this screen (another tab of the site): read them again
+  // when that happens and whenever the app comes back to the screen, so the notice never goes stale.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshSetup();
+    };
+    window.addEventListener('storage', refreshSetup);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('storage', refreshSetup);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshSetup]);
 
   const blocked = setup.notSetUp.includes(mode);
   const empty = chat.messages.length === 0;
   const error = notice?.kind === 'error' ? kidMessage(notice.reason) : null;
 
+  if (inParentArea) {
+    return (
+      <div className="screen">
+        <ParentArea parent={parent} onClose={closeParentArea} onChatsDeleted={startNewChat} />
+      </div>
+    );
+  }
+
   return (
     <div className="screen">
-      {/* While the mode picker is open, nothing behind it can be reached. */}
-      <div className="screen-content" inert={pickingMode}>
+      {/* While the mode picker or the list of chats is open, nothing behind it can be reached. */}
+      <div className="screen-content" inert={pickingMode || inHistory}>
       <header className="top-bar">
-        <span className="top-bar-side" />
+        <button type="button" className="icon-button" aria-label="השיחות שלי" onClick={() => setInHistory(true)}>
+          <MenuIcon />
+        </button>
         <h1 className="top-bar-title">{chat.title}</h1>
         <button type="button" className="icon-button" aria-label="שיחה חדשה" onClick={startNewChat}>
           <PlusIcon />
         </button>
       </header>
+      {/* For as long as the child instructions are off, the chat screen says so: a phone handed back to her like this is noticed. */}
+      {setup.parentUse && (
+        <p className="parent-use" role="note">
+          {PARENT_USE_MESSAGE}
+        </p>
+      )}
 
       <main className="scroll">
         {empty ? (
@@ -79,9 +134,30 @@ export function App({ services }: { services: Services }) {
         </div>
       </main>
 
-      <Composer mode={mode} writing={writing} blocked={blocked} onSend={send} onStop={stop} onPickMode={() => setPickingMode(true)} />
+      <Composer
+        mode={mode}
+        writing={writing}
+        blocked={blocked}
+        attach={setup.filesReady && !blocked && canAttachIn(mode) ? services.prepareAttachment : null}
+        onSend={send}
+        onStop={stop}
+        onPickMode={() => setPickingMode(true)}
+      />
       </div>
       {pickingMode && <ModeSheet mode={mode} onPick={setMode} onClose={() => setPickingMode(false)} />}
+      {inHistory && (
+        <HistoryDrawer
+          currentId={chat.id}
+          saved={services.store !== null}
+          now={services.now}
+          list={listChats}
+          onOpen={openChat}
+          onRename={renameChat}
+          onNew={startNewChat}
+          onParentArea={() => setInParentArea(true)}
+          onClose={() => setInHistory(false)}
+        />
+      )}
     </div>
   );
 }

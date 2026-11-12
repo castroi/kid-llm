@@ -1,6 +1,8 @@
-import type { ChatMessage } from '../ai/providers';
+import { IMAGE_TYPES, MAX_IMAGE_BYTES, type ChatMessage, type GeneratedImage, type ImageType } from '../ai/providers';
+import { sanitizeSources, type Source } from '../ai/sources';
 import { MODES, type ModeId } from './modes';
 import { cut } from './text';
+import { canAttachIn, sanitizeAttachment, type Attachment } from './attachment';
 
 /** One message as it is kept on the phone. */
 export interface StoredMessage {
@@ -11,11 +13,17 @@ export interface StoredMessage {
   at: number;
   /** The mode she was in; shown under an answer instead of a model name. */
   mode: ModeId;
+  /** A picture or a document she attached to this message of hers. Its bytes are kept with the chat, on the phone only. */
+  attachment?: Attachment;
   /**
    * How an answer ended, when it didn't end normally:
    * `stopped` she pressed "עצירה" (the text so far is kept); `failed` the call failed.
    */
   state?: 'stopped' | 'failed';
+  /** The picture, when this is the answer to a drawing request. Its bytes are kept with the chat, on the phone only. */
+  image?: GeneratedImage;
+  /** The websites a search answer was drawn from: addresses only, shown under it as links. Never sent to a model. */
+  sources?: Source[];
 }
 
 /** One conversation, kept whole in one record on the phone. */
@@ -75,14 +83,21 @@ export const MAX_CONTEXT_CHARS = 24_000;
 
 /**
  * The conversation as it is sent to the provider: oldest first, ending with her newest
- * message. Left out: answers that failed, empty messages, and anything that is not hers
- * or an answer (a stored record can't add instructions of its own). Messages in a row
- * from the same side are joined, because some models refuse two in a row. When the
+ * message. Left out: answers that failed, empty messages, anything that is not hers or an
+ * answer (a stored record can't add instructions of its own), and everything from drawing
+ * mode. Messages in a row from the same side are joined, because some models refuse two
+ * in a row. When the
  * conversation is longer than `maxChars`, the oldest messages are dropped; her newest
  * always goes, cut to `maxChars`. Empty when there is nothing of hers to answer.
+ *
+ * Of the files she attached, only the newest one that is still inside the conversation goes,
+ * with the message it was attached to: the provider keeps no file between calls, and
+ * resending every old picture with every message would cost far more than it helps.
  */
 export function toProviderMessages(messages: readonly StoredMessage[], maxChars: number = MAX_CONTEXT_CHARS): ChatMessage[] {
-  const known = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string');
+  // Drawing requests and their pictures are not part of the talk: a picture can't be sent
+  // as text, and its request alone would look like a question nobody answered.
+  const known = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.mode !== 'draw');
   // An answer that failed or has no text yet is no answer: the question before it still waits.
   const real = known.filter((m) => m.role === 'user' || (m.text.trim() !== '' && m.state !== 'failed'));
   // Only a conversation that ends with a message of hers has something to answer; a
@@ -93,17 +108,39 @@ export function toProviderMessages(messages: readonly StoredMessage[], maxChars:
 
   const kept: ChatMessage[] = [];
   let used = 0;
+  let fileTaken = false;
   for (let i = usable.length - 1; i >= 0; i--) {
-    const { role } = usable[i];
+    const { role, attachment } = usable[i];
     const content = cut(usable[i].text, maxChars);
     if (kept.length > 0 && used + content.length > maxChars) break;
     used += content.length;
-    if (kept[0]?.role === role) kept[0] = { role, content: `${content}\n\n${kept[0].content}` };
-    else kept.unshift({ role, content });
+    // Walking from the newest: the first file met is the newest one, and the only one that may go.
+    // One the provider refused doesn't go again. Her name for the file stays on the phone.
+    const newest = !fileTaken && role === 'user' && attachment !== undefined;
+    if (newest) fileTaken = true;
+    const file = newest && !attachment.refused ? { kind: attachment.kind, bytes: attachment.bytes } : undefined;
+    if (kept[0]?.role === role) kept[0] = { ...kept[0], content: `${content}\n\n${kept[0].content}`, ...(file ? { file } : {}) };
+    else kept.unshift(file ? { role, content, file } : { role, content });
   }
   // A conversation can't open with an answer whose question was dropped.
   while (kept.length > 1 && kept[0].role === 'assistant') kept.shift();
   return kept;
+}
+
+/** Marks her newest file as refused by the provider, so it is not sent again (see `Attachment.refused`). */
+export function withNewestFileRefused(messages: readonly StoredMessage[]): StoredMessage[] {
+  let index = messages.length - 1;
+  while (index >= 0 && !(messages[index].role === 'user' && messages[index].attachment)) index--;
+  return messages.map((message, i) => (i === index && message.attachment ? { ...message, attachment: { ...message.attachment, refused: true as const } } : message));
+}
+
+/** A stored picture as it may be shown: one of the known picture types, with bytes of a sane size. Otherwise null. */
+function sanitizeImage(raw: unknown): GeneratedImage | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { type, bytes } = raw as Record<string, unknown>;
+  if (typeof type !== 'string' || !(IMAGE_TYPES as readonly string[]).includes(type)) return null;
+  if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return null;
+  return { type: type as ImageType, bytes };
 }
 
 const MODE_IDS: readonly string[] = MODES.map((m) => m.id);
@@ -126,7 +163,15 @@ export function sanitizeChat(raw: unknown): Chat | null {
     const m = item as Record<string, unknown>;
     if ((m.role !== 'user' && m.role !== 'assistant') || typeof m.id !== 'string' || typeof m.text !== 'string') continue;
     const message: StoredMessage = { id: m.id, role: m.role, text: m.text, at: isTime(m.at) ? m.at : value.createdAt, mode: isMode(m.mode) ? m.mode : mode };
+    // A file is hers only, and only in the modes where she can attach one.
+    const attachment = sanitizeAttachment(m.attachment);
+    if (attachment && m.role === 'user' && canAttachIn(message.mode)) message.attachment = attachment;
     if (m.state === 'stopped' || m.state === 'failed') message.state = m.state;
+    const image = sanitizeImage(m.image);
+    if (image && m.role === 'assistant') message.image = image;
+    // Checked again like anything stored: only https addresses, and only on a search answer.
+    const sources = sanitizeSources(m.sources);
+    if (sources.length > 0 && m.role === 'assistant' && message.mode === 'search') message.sources = sources;
     messages.push(message);
   }
   return {

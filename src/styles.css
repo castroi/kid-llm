@@ -14,6 +14,8 @@
   /* A send button with nothing to send: white on it is still 4.6:1. */
   --disabled: #6f7588;
   --scrim: rgba(26, 29, 46, 0.45);
+  /* Delete buttons and warnings: 6.6:1 on white. */
+  --danger: #b42318;
   color-scheme: light;
 }
 
@@ -116,6 +118,19 @@ button:disabled {
   background: transparent;
 }
 
+/* Shown under the top bar for as long as a parent has the child instructions switched off. */
+.parent-use {
+  margin: 0 12px 6px;
+  padding: 8px 14px;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--danger);
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  border-radius: 14px;
+}
+
 /* The only part that scrolls; the top bar and the composer stay in place. */
 .scroll {
   flex: 1;
@@ -213,14 +228,40 @@ button:disabled {
   padding: 12px 16px 0;
 }
 
-/* Her message: at the start of the line (the right, in Hebrew). */
-.bubble {
+/* Her message with its copy button under it: at the start of the line (the right, in Hebrew). */
+.mine {
   align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   max-width: 85%;
+}
+
+.bubble {
+  max-width: 100%;
   padding: 12px 16px;
   border-radius: 22px;
   background: var(--accent-tint);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What she attached, inside her own message. */
+.attached-picture {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+}
+
+.attached-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 15px;
   overflow-wrap: anywhere;
 }
 
@@ -279,6 +320,36 @@ button:disabled {
   margin: 0;
   font-size: 15px;
   color: var(--muted);
+}
+
+/* Where a search answer came from: one link per site, each a full touch target. */
+.sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  max-width: 100%;
+  padding: 0 14px;
+  font-size: 15px;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  overflow-wrap: anywhere;
 }
 
 .small-button {
@@ -344,6 +415,42 @@ button:disabled {
 
 .composer-input::placeholder {
   color: var(--muted);
+}
+
+/* A file waiting to be sent with the message. */
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline-start: 12px;
+  font-size: 15px;
+  background: var(--accent-tint);
+  border-radius: 14px;
+}
+
+.attachment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-status {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.composer-status:empty {
+  display: none;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .composer-row {
@@ -463,4 +570,326 @@ button:disabled {
   color: var(--on-accent);
   background: var(--accent);
   border-radius: 14px;
+}
+
+.picture {
+  display: block;
+  width: min(100%, 320px);
+  height: auto;
+  border-radius: 20px;
+  background: var(--accent-tint);
+  /* Long-press saves it; the callout is Safari's own. */
+  -webkit-touch-callout: default;
+}
+
+.drawing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: min(100%, 320px);
+  min-height: 120px;
+  margin: 0;
+  border-radius: 20px;
+  background: var(--accent-tint);
+}
+
+/* Parent area */
+.parent {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.parent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 8px 16px 24px;
+}
+
+.text-button {
+  min-width: 48px;
+  min-height: 48px;
+  padding: 0 8px;
+  font-weight: 500;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  border-radius: 14px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field label {
+  font-size: 15px;
+  color: var(--muted);
+}
+
+/* 17px: under 16px Safari zooms the page when a field is tapped. */
+.input {
+  width: 100%;
+  min-height: 48px;
+  padding: 10px 12px;
+  font: inherit;
+  font-size: 17px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+/* Typed characters shown as dots, without being a password field Safari would offer to save. */
+.secret {
+  -webkit-text-security: disc;
+}
+
+textarea.input {
+  line-height: 1.5;
+  resize: vertical;
+}
+
+.input::placeholder {
+  color: var(--muted);
+}
+
+.hint {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.hint.warning {
+  color: var(--danger);
+}
+
+/* A tick box with its label: the whole row is the touch target. */
+.field label.check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  font-size: 17px;
+  color: var(--ink);
+}
+
+.check input {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* The built-in instructions, folded away until a parent wants to read them. */
+.builtin summary {
+  padding: 13px 0;
+  font-size: 15px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.builtin-text {
+  margin: 4px 0 12px;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* Which build is on the phone, at the bottom of the parent's settings. */
+.version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
+.button {
+  min-height: 48px;
+  padding: 0 16px;
+  font-size: 16px;
+  font-weight: 500;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.button.primary {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.button.danger {
+  color: var(--danger);
+  background: var(--surface);
+  border-color: var(--danger);
+}
+
+.button:disabled {
+  color: var(--on-accent);
+  background: var(--disabled);
+  border-color: var(--disabled);
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.status {
+  margin: 0;
+  font-size: 15px;
+}
+
+.status:empty {
+  display: none;
+}
+
+.status p {
+  margin: 0;
+}
+
+/* The provider's own words, which may be English inside the Hebrew screen. */
+.detail {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirm p {
+  margin: 0;
+}
+
+/* The list of chats: slides in from the side the text starts on (the right, in Hebrew). */
+.drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.drawer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(330px, 86vw);
+  height: 100%;
+  padding: calc(8px + env(safe-area-inset-top)) 14px calc(16px + env(safe-area-inset-bottom));
+  background: var(--surface);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.button.with-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.drawer-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.drawer-day {
+  margin: 0;
+  padding: 10px 6px 4px;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.drawer-chats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.drawer-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.drawer-chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 10px;
+  text-align: start;
+  background: transparent;
+  border: 0;
+  border-radius: 14px;
+}
+
+.drawer-chat[aria-current='true'] {
+  background: var(--accent-tint);
+}
+
+.drawer-chat-icon {
+  flex: none;
+  display: flex;
+  color: var(--accent);
+}
+
+.drawer-chat-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.drawer-actions {
+  padding: 4px 6px 12px;
 }

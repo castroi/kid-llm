@@ -1,13 +1,14 @@
-import { systemPromptFor } from './baseline';
+import { imagePromptFor, systemPromptFor } from './baseline';
 import type { AiProviderId } from './catalog';
-import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike } from './providers';
+import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, type GeneratedImage } from './providers';
 
 /**
  * The only way the app calls a provider. It applies the timeout, tells her "עצירה" from
  * a timeout, and checks that an answer came back. Adapted from kid-closet's src/ai/send.ts.
  *
  * The provider keeps nothing between calls: every call carries the whole conversation
- * (`messages`). The baseline instructions (src/ai/baseline.ts) go first, then the parent's.
+ * (`messages`). The baseline instructions (src/ai/baseline.ts) go first, then the parent's;
+ * the child baseline is left out only when a parent switched the app to their own use.
  */
 
 /** Nothing from the provider for this long means the call hangs. A long answer is fine: everything it sends restarts the clock. */
@@ -19,6 +20,8 @@ export const CHAT_IDLE_TIMEOUT_MS = 60_000;
  */
 export const CHAT_NO_TEXT_TIMEOUT_MS = 180_000;
 export const CHECK_TIMEOUT_MS = 20_000;
+/** A picture arrives whole, with nothing in between; this is the longest she waits for one. */
+export const IMAGE_TIMEOUT_MS = 120_000;
 
 const defaultFetch: FetchLike = (url, init) => fetch(url, init);
 
@@ -83,11 +86,18 @@ export interface ChatRequest {
   provider: AiProviderId;
   /** The model the parent chose for the mode she is in. */
   model: string;
-  /** What the parent wrote; may be empty. The baseline instructions are always sent before it. */
+  /** What the parent wrote; may be empty. The baseline instructions are sent before it unless `kidUse` is false. */
   systemPrompt: string;
-  /** The whole conversation so far, oldest first, ending with her new message. */
+  /**
+   * False only when a parent switched the app to their own use in the parent area: the
+   * child baseline is then left out. Anything else, also when it is missing, means a child.
+   */
+  kidUse?: boolean;
+  /** The whole conversation so far, oldest first, ending with her new message. A message may carry a file she attached. */
   messages: ChatMessage[];
   apiKey: string;
+  /** Search mode: look the question up on the web first. What is sent in `messages` then also reaches a search engine, through the provider. */
+  webSearch?: boolean;
   /** Called with each piece of the answer as it arrives, so she sees it being written. */
   onDelta: (text: string) => void;
   /** Her "עצירה". The pieces already given to onDelta stay hers to keep. */
@@ -104,12 +114,16 @@ export interface ChatRequest {
  */
 export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const apiKey = usableKey(req.apiKey);
+  // A search call never carries a file: what goes into a search also reaches a search engine.
+  const messages: ChatMessage[] = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
+  const withFile = messages.some((message) => message.file !== undefined);
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
-      systemPrompt: systemPromptFor(req.systemPrompt),
-      messages: req.messages,
+      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true, withFile, req.kidUse !== false),
+      messages,
       apiKey,
+      webSearch: req.webSearch === true,
       signal,
       fetch: req.fetch ?? defaultFetch,
       onDelta: (text) => {
@@ -122,6 +136,36 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   if (result.finishReason === 'content_filter') throw new AiError('refused');
   if (result.text === '') throw new AiError('bad-response', 'no answer text');
   return result;
+}
+
+export interface ImageRequest {
+  provider: AiProviderId;
+  /** The model the parent chose for drawing. */
+  model: string;
+  /** What she asked to draw, as she wrote it. Nothing else of the chat is sent. */
+  prompt: string;
+  apiKey: string;
+  /** Her "עצירה". */
+  signal?: AbortSignal;
+  fetch?: FetchLike;
+  timeoutMs?: number;
+}
+
+/**
+ * Asks the provider for one picture of what she wrote, with safe mode on and the
+ * child-safety line added. Throws AiError with a reason the UI can explain; a picture the
+ * provider blurred or flagged is `refused` and never reaches the screen.
+ */
+export function generateImage(req: ImageRequest): Promise<GeneratedImage> {
+  return withDeadline(req.signal, req.timeoutMs ?? IMAGE_TIMEOUT_MS, async (signal) =>
+    ADAPTERS[req.provider].generateImage({
+      model: req.model,
+      prompt: imagePromptFor(req.prompt),
+      apiKey: usableKey(req.apiKey),
+      signal,
+      fetch: req.fetch ?? defaultFetch,
+    }),
+  );
 }
 
 /** Checks the parent's key against the provider ("בדיקת חיבור"). Resolves with a note to show, if any. */

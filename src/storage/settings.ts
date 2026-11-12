@@ -14,12 +14,22 @@ export interface Settings {
   provider: AiProviderId;
   /** The provider's model name behind each mode; empty = that mode is not set up yet. */
   models: Record<ModeId, string>;
+  /**
+   * The model her attached pictures and documents are sent to; it has to be one that can
+   * read pictures. Absent = not set up: she gets no attach button and no file leaves the phone.
+   */
+  fileModel?: string;
   /** The parent's own instructions, sent after the built-in ones. May describe her; a backup that includes it says so. */
   systemPrompt: string;
   /** Her name, for the greeting only; never sent to the provider. Personal: a backup that includes it says so. */
   childName: string;
   /** The most messages she can send in a day; null = no limit. */
   dailyLimit: number | null;
+  /**
+   * A parent uses the app themself: the built-in child instructions are not sent with a chat.
+   * Absent = the app is used by a child, which is the default and what anything unreadable means.
+   */
+  parentUse?: true;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -52,12 +62,16 @@ export function sanitizeSettings(raw: unknown): Settings {
   const models = { ...DEFAULT_SETTINGS.models };
   for (const mode of MODES) models[mode.id] = text(rawModels[mode.id], MAX_MODEL_CHARS).trim();
   const limit = value.dailyLimit;
+  const fileModel = text(value.fileModel, MAX_MODEL_CHARS).trim();
   return {
     provider: typeof value.provider === 'string' && Object.hasOwn(AI_PROVIDERS, value.provider) ? (value.provider as AiProviderId) : DEFAULT_SETTINGS.provider,
     models,
+    ...(fileModel ? { fileModel } : {}),
     systemPrompt: text(value.systemPrompt, MAX_SYSTEM_PROMPT_CHARS),
     childName: text(value.childName, MAX_NAME_CHARS).trim(),
     dailyLimit: typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 ? Math.min(limit, MAX_DAILY_LIMIT) : null,
+    // Only the exact value a parent's untick saves; anything else is a child's phone.
+    ...(value.parentUse === true ? { parentUse: true as const } : {}),
   };
 }
 
@@ -107,4 +121,21 @@ export function missingFor(mode: ModeId, settings: Settings, apiKey: string): 'k
   if (!apiKey) return 'key';
   if (!settings.models[mode]) return 'model';
   return null;
+}
+
+/** A key, or settings other than the defaults, are saved on this phone. */
+export function hasSetup(storage: KeyValue = localStorage): boolean {
+  const fresh = JSON.stringify(sanitizeSettings(DEFAULT_SETTINGS));
+  return Object.keys(AI_PROVIDERS).some((provider) => loadApiKey(provider as AiProviderId, storage) !== '') || JSON.stringify(loadSettings(storage)) !== fresh;
+}
+
+/** Removes every saved key and the settings. Returns false when the browser refused. */
+export function forgetSetup(storage: KeyValue = localStorage): boolean {
+  try {
+    for (const provider of Object.keys(AI_PROVIDERS)) storage.removeItem(apiKeyEntry(provider as AiProviderId));
+    storage.removeItem(SETTINGS_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }

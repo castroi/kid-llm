@@ -1,4 +1,6 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
+import { dataUrl, SENT_FILE_NAMES, type ChatFile } from './files';
+import { sanitizeSources, type Source } from './sources';
 import { LineTooLongError, sseData } from './sse';
 
 /**
@@ -7,6 +9,8 @@ import { LineTooLongError, sseData } from './sse';
  * shared in src/ai/send.ts, so a new provider only describes its own request and response.
  * Adapted from kid-closet's src/ai/providers.ts.
  * Docs: Venice https://docs.venice.ai/api-reference/endpoint/chat/completions
+ *       and https://docs.venice.ai/api-reference/endpoint/image/generate
+ *       Files in a chat: https://docs.venice.ai/guides/features/vision and .../guides/features/file-inputs
  */
 
 /** Why a call failed. The kid sees one friendly line; the parent area shows the reason. */
@@ -16,7 +20,7 @@ export type AiErrorReason =
   | 'rate-limited' // 429
   | 'bad-request' // 400/404/413/415: model name or request the provider doesn't accept
   | 'provider-down' // 5xx, or an error sent in the middle of an answer
-  | 'refused' // the provider's content filter
+  | 'refused' // the provider's content filter (also 422, and a picture it blurred or flagged)
   | 'network' // no answer, or the connection dropped: offline, or blocked for web pages (CORS)
   | 'timeout'
   | 'cancelled' // she pressed "עצירה"
@@ -43,17 +47,21 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** A picture or a document she attached to this message (src/ai/files.ts). Only on a message of hers. */
+  file?: ChatFile;
 }
 
 export interface ChatCall {
   model: string;
-  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first, never empty. */
+  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first. Empty only in a parent's own use with nothing written: then no system message is sent. */
   systemPrompt: string;
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
   apiKey: string;
   signal: AbortSignal;
   fetch: FetchLike;
+  /** Search mode: the provider looks the question up on the web before it answers. */
+  webSearch: boolean;
   /** Called with each piece of the answer as it arrives. */
   onDelta: (text: string) => void;
   /** Called whenever the provider sends anything, also while a model thinks before it writes. */
@@ -65,10 +73,35 @@ export interface ChatResult {
   text: string;
   /** Why the provider stopped ("stop", "length", "content_filter"), when it said. */
   finishReason: string | null;
+  /** Search mode only: the websites the answer was drawn from, when the provider named any (src/ai/sources.ts). */
+  sources?: Source[];
+}
+
+/** A picture as it came from the provider and as it is kept on the phone. */
+export interface GeneratedImage {
+  type: ImageType;
+  bytes: ArrayBuffer;
+}
+
+export const IMAGE_TYPES = ['image/webp', 'image/png', 'image/jpeg'] as const;
+export type ImageType = (typeof IMAGE_TYPES)[number];
+
+/** Well above a real picture (a 1024 px WebP is under 1 MB); more than this is not downloaded or kept. */
+export const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+
+export interface ImageCall {
+  model: string;
+  /** What she asked for, with the child-safety line added (src/ai/baseline.ts). */
+  prompt: string;
+  apiKey: string;
+  signal: AbortSignal;
+  fetch: FetchLike;
 }
 
 export interface ProviderAdapter {
   streamChat(call: ChatCall): Promise<ChatResult>;
+  /** Makes one picture. A picture the provider blurred or flagged is a refusal, never shown. */
+  generateImage(call: ImageCall): Promise<GeneratedImage>;
   /** Resolves when the key works; the text, if any, is shown to the parent. */
   checkKey(call: { apiKey: string; signal: AbortSignal; fetch: FetchLike }): Promise<string | null>;
 }
@@ -85,6 +118,8 @@ function reasonForStatus(status: number): AiErrorReason {
   if (status === 401 || status === 403) return 'unauthorized';
   if (status === 402) return 'no-credit';
   if (status === 429) return 'rate-limited';
+  // 422: the provider's content policy refused the request.
+  if (status === 422) return 'refused';
   if (status >= 500) return 'provider-down';
   return 'bad-request';
 }
@@ -117,6 +152,32 @@ async function readLimitedText(response: Response, max: number): Promise<string>
     await reader.cancel().catch(() => undefined);
   }
   return text;
+}
+
+/** Reads a response's bytes, and gives up with `bad-response` past `max`. */
+async function readLimitedBytes(response: Response, max: number): Promise<ArrayBuffer> {
+  if (!response.body) return new ArrayBuffer(0);
+  const reader = response.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) throw new AiError('bad-response', 'picture too large');
+      parts.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => undefined);
+  }
+  const whole = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    whole.set(part, at);
+    at += part.byteLength;
+  }
+  return whole.buffer;
 }
 
 /** Turns a failed response into an AiError, with the provider's message (without the key) when it sent one. */
@@ -159,16 +220,19 @@ function headers(apiKey: string, json: boolean): Record<string, string> {
 interface StreamChunk {
   error?: unknown;
   choices?: { delta?: { content?: unknown }; finish_reason?: unknown }[];
+  /** Venice: the pages a web search found, in `web_search_citations` (its docs: "in the first chunk of a streaming result"). */
+  venice_parameters?: { web_search_citations?: unknown } | null;
 }
 
 /**
  * Reads a streamed chat answer in the OpenAI-compatible format: one JSON chunk per
  * "data:" line with the next piece of text, then "data: [DONE]".
  */
-async function readChatStream(response: Response, { apiKey, signal, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
+async function readChatStream(response: Response, { apiKey, signal, webSearch, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
   if (!response.body) throw new AiError('bad-response', 'no answer body');
   let text = '';
   let finishReason: string | null = null;
+  let sources: Source[] = [];
   // An exception from the screen's own code is not a network failure; it passes through as it is.
   const fromCaller: { thrown: boolean; error?: unknown } = { thrown: false };
   try {
@@ -184,6 +248,9 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
         continue; // a keep-alive or a line we don't know; the text lines still count
       }
       if (chunk?.error) throw new AiError('provider-down', redact(errorMessage(chunk.error), apiKey).slice(0, 300));
+      // Read in search mode only, wherever in the stream they arrive; the first list that
+      // holds a usable address is kept. Only the addresses are taken (src/ai/sources.ts).
+      if (webSearch && sources.length === 0) sources = sanitizeSources(chunk?.venice_parameters?.web_search_citations);
       const choice = chunk?.choices?.[0];
       if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason;
       const delta = choice?.delta?.content;
@@ -206,27 +273,79 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
     if (err instanceof LineTooLongError) throw new AiError('bad-response', 'line too long');
     throw new AiError('network', errorName(err));
   }
-  return { text, finishReason };
+  return sources.length > 0 ? { text, finishReason, sources } : { text, finishReason };
+}
+
+/**
+ * One turn as Venice takes it. A message with a file is sent in parts: her text first, then
+ * the file inside the request itself as a `data:` address. A picture goes to a vision model
+ * as it is; Venice turns a document into text before the model sees it.
+ */
+function veniceMessage({ role, content, file }: ChatMessage): unknown {
+  if (!file || role !== 'user') return { role, content };
+  const part =
+    file.kind === 'image'
+      ? { type: 'image_url', image_url: { url: dataUrl(file) } }
+      : { type: 'file', file: { file_data: dataUrl(file), filename: SENT_FILE_NAMES[file.kind] } };
+  return { role, content: [{ type: 'text', text: content }, part] };
 }
 
 const venice: ProviderAdapter = {
   async streamChat(chat) {
-    const { model, systemPrompt, messages, apiKey, signal, fetch } = chat;
+    const { model, systemPrompt, messages, apiKey, signal, fetch, webSearch } = chat;
     const init: RequestInit = {
       method: 'POST',
       headers: headers(apiKey, true),
       body: JSON.stringify({
         model,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages.map(veniceMessage)],
         stream: true,
         // Venice adds its own system prompt unless told not to; only the parent's goes with her chat.
-        venice_parameters: { include_venice_system_prompt: false },
+        // Search mode always searches ("on"), so she gets what she picked; other modes never do.
+        venice_parameters: { include_venice_system_prompt: false, ...(webSearch ? { enable_web_search: 'on' } : {}) },
       }),
       signal,
     };
     const response = await call(fetch, AI_PROVIDERS.venice.endpoints.chat, init);
     if (!response.ok) throw await failure(response, apiKey);
     return readChatStream(response, chat);
+  },
+  async generateImage({ model, prompt, apiKey, signal, fetch }) {
+    const init: RequestInit = {
+      method: 'POST',
+      headers: headers(apiKey, true),
+      // safe_mode stays on (Venice's default) and is always sent: it's a kid's app.
+      // The picture comes back as the answer's bytes, so the refusal headers below come with it.
+      body: JSON.stringify({ model, prompt, safe_mode: true, return_binary: true, format: 'webp' }),
+      signal,
+    };
+    const response = await call(fetch, AI_PROVIDERS.venice.endpoints.image, init);
+    if (!response.ok) throw await failure(response, apiKey);
+    // With safe mode on, an adult picture comes back blurred, and one against the provider's
+    // terms comes back flagged; Venice says which in two headers. A picture is shown only
+    // when both say "false". A header that is missing counts as a refusal too: a web page
+    // can read these headers only if Venice exposes them (CORS), and a picture nobody could
+    // check is not shown to her.
+    const checkedFine = response.headers.get('x-venice-is-blurred') === 'false' && response.headers.get('x-venice-is-content-violation') === 'false';
+    if (!checkedFine) {
+      const unreadable = response.headers.get('x-venice-is-blurred') === null || response.headers.get('x-venice-is-content-violation') === null;
+      await response.body?.cancel().catch(() => undefined);
+      throw new AiError('refused', unreadable ? 'the picture safety headers could not be read' : '');
+    }
+    const type = (response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    if (!(IMAGE_TYPES as readonly string[]).includes(type)) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new AiError('bad-response', 'not a picture');
+    }
+    let bytes: ArrayBuffer;
+    try {
+      bytes = await readLimitedBytes(response, MAX_IMAGE_BYTES);
+    } catch (err) {
+      if (err instanceof AiError || signal.aborted) throw err; // send.ts tells a timeout from a stop
+      throw new AiError('network', errorName(err));
+    }
+    if (bytes.byteLength === 0) throw new AiError('bad-response', 'empty picture');
+    return { type: type as ImageType, bytes };
   },
   async checkKey({ apiKey, signal, fetch }) {
     const response = await call(fetch, AI_PROVIDERS.venice.endpoints.check, { method: 'GET', headers: headers(apiKey, false), signal });

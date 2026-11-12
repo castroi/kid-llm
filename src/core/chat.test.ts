@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_CONTEXT_CHARS, newChat, sanitizeChat, titleFrom, toProviderMessages, UNTITLED, withMessage, withUpdatedMessage, type StoredMessage } from './chat';
+import { MAX_CONTEXT_CHARS, newChat, sanitizeChat, titleFrom, toProviderMessages, UNTITLED, withMessage, withNewestFileRefused, withUpdatedMessage, type StoredMessage } from './chat';
 
 let counter = 0;
 function message(role: StoredMessage['role'], text: string, extra: Partial<StoredMessage> = {}): StoredMessage {
@@ -160,5 +160,163 @@ describe('sanitizeChat', () => {
     for (const junk of [null, undefined, 'text', 7, [], {}, { id: '', createdAt: 1 }, { id: 'c', createdAt: 'x' }, { id: 7, createdAt: 1 }]) {
       expect(sanitizeChat(junk)).toBeNull();
     }
+  });
+});
+
+describe('files she attached', () => {
+  // "%PDF-1.7", as bytes of this page's own kind (a TextEncoder's bytes are not, under jsdom).
+  const pdf = () => ({ kind: 'pdf' as const, bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]).buffer, name: 'דף עבודה.pdf' });
+  const photo = () => ({ kind: 'image' as const, bytes: new Uint8Array([0xff, 0xd8, 0xff, 1]).buffer, name: '' });
+  const chatWith = (attachment: unknown, role: StoredMessage['role'] = 'user', mode = 'chat') => ({
+    id: 'c1',
+    title: 'דף',
+    mode: 'chat',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [{ id: 'q', role, text: 'מה כתוב כאן?', at: 1, mode, attachment }],
+  });
+
+  it('are kept with her message when the chat is read back', () => {
+    expect(sanitizeChat(chatWith(pdf()))?.messages[0].attachment).toEqual(pdf());
+    expect(sanitizeChat(chatWith(photo(), 'user', 'math'))?.messages[0].attachment).toEqual(photo());
+  });
+
+  it('are dropped when the bytes are not that kind of file, on an answer, or in a mode that takes no file', () => {
+    for (const bad of [{ kind: 'pdf', bytes: new Uint8Array([1, 2, 3]).buffer }, { kind: 'html', bytes: pdf().bytes }, 'file', null]) {
+      expect(sanitizeChat(chatWith(bad))?.messages[0]).not.toHaveProperty('attachment');
+    }
+    expect(sanitizeChat(chatWith(pdf(), 'assistant'))?.messages[0]).not.toHaveProperty('attachment');
+    expect(sanitizeChat(chatWith(pdf(), 'user', 'search'))?.messages[0]).not.toHaveProperty('attachment');
+    expect(sanitizeChat(chatWith(pdf(), 'user', 'draw'))?.messages[0]).not.toHaveProperty('attachment');
+  });
+
+  it('go to the provider with the message they were attached to, without her name for the file', () => {
+    const sent = toProviderMessages([message('user', 'מה כתוב כאן?', { attachment: pdf() })]);
+    expect(sent).toEqual([{ role: 'user', content: 'מה כתוב כאן?', file: { kind: 'pdf', bytes: pdf().bytes } }]);
+    expect(sent[0].file).not.toHaveProperty('name');
+  });
+
+  it('only the newest file is sent again with a later message', () => {
+    const talk = [
+      message('user', 'מה כתוב כאן?', { attachment: pdf() }),
+      message('assistant', 'תרגיל בשברים'),
+      message('user', 'ומה בתמונה?', { attachment: photo() }),
+      message('assistant', 'חתול'),
+      message('user', 'תודה'),
+    ];
+    const sent = toProviderMessages(talk);
+    expect(sent.map((m) => m.file?.kind)).toEqual([undefined, undefined, 'image', undefined, undefined]);
+    // Before she attached the photo, the document was the newest and went with a follow-up.
+    expect(toProviderMessages(talk.slice(0, 2).concat(message('user', 'ושאלה 2?'))).map((m) => m.file?.kind)).toEqual(['pdf', undefined, undefined]);
+  });
+
+  it('are not sent again once the provider refused them, and an older file does not come back instead', () => {
+    const talk = [message('user', 'מה כתוב כאן?', { attachment: pdf() }), message('assistant', 'תרגיל'), message('user', 'ומה בתמונה?', { attachment: photo() })];
+    const refused = withNewestFileRefused(talk);
+    expect(refused[2].attachment).toEqual({ ...photo(), refused: true });
+    expect(refused[0].attachment).toEqual(pdf());
+    expect(talk[2].attachment).not.toHaveProperty('refused');
+    expect(toProviderMessages(refused).some((m) => m.file !== undefined)).toBe(false);
+    // Nothing to mark: the messages come back as they were.
+    const plain = [message('user', 'שלום')];
+    expect(withNewestFileRefused(plain)).toEqual(plain);
+    // The mark survives being read back from the phone.
+    const stored = sanitizeChat({ id: 'c', title: 't', mode: 'chat', createdAt: 1, updatedAt: 2, messages: refused });
+    expect(stored?.messages[2].attachment?.refused).toBe(true);
+  });
+
+  it('have their stored name cleaned like anything stored: no path, no hidden characters', () => {
+    const crafted = { ...pdf(), name: '/private/var/mobile/\u202Eevil\u0000name.pdf' };
+    expect(sanitizeChat(chatWith(crafted))?.messages[0].attachment?.name).toBe('evilname.pdf');
+  });
+
+  it('stay with her message when it is joined to another of hers, and go away with a message that no longer fits', () => {
+    const joined = toProviderMessages([message('user', 'הנה הדף', { attachment: pdf() }), message('user', 'מה כתוב בו?')]);
+    expect(joined).toEqual([{ role: 'user', content: 'הנה הדף\n\nמה כתוב בו?', file: { kind: 'pdf', bytes: pdf().bytes } }]);
+    const long = [message('user', 'א'.repeat(30), { attachment: pdf() }), message('assistant', 'ב'.repeat(30)), message('user', 'ג'.repeat(30))];
+    expect(toProviderMessages(long, 40).some((m) => m.file !== undefined)).toBe(false);
+  });
+});
+
+describe('pictures', () => {
+  const picture = () => ({ type: 'image/webp' as const, bytes: new Uint8Array([1, 2, 3]).buffer });
+  const chatWith = (image: unknown, role: StoredMessage['role'] = 'assistant') => ({
+    id: 'c1',
+    title: 'ציור',
+    mode: 'draw',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [
+      { id: 'q', role: 'user', text: 'חתול על סקייטבורד', at: 1, mode: 'draw' },
+      { id: 'a', role, text: '', at: 2, mode: 'draw', image },
+    ],
+  });
+
+  it('are kept with their answer when the chat is read back', () => {
+    const kept = sanitizeChat(chatWith(picture()))?.messages[1].image;
+    expect(kept?.type).toBe('image/webp');
+    expect(new Uint8Array(kept!.bytes)).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it('are dropped when they are not a picture of a known type and a sane size, or sit on a message of hers', () => {
+    const bad = [
+      { type: 'image/svg+xml', bytes: new Uint8Array([1]).buffer },
+      { type: 'text/html', bytes: new Uint8Array([1]).buffer },
+      { type: 'image/png', bytes: new ArrayBuffer(0) },
+      { type: 'image/png', bytes: 'AAAA' },
+      { type: 'image/png' },
+      'picture',
+      null,
+    ];
+    for (const image of bad) expect(sanitizeChat(chatWith(image))?.messages[1]).not.toHaveProperty('image');
+    expect(sanitizeChat(chatWith(picture(), 'user'))?.messages[1]).not.toHaveProperty('image');
+  });
+
+  it('and the requests for them are left out of what a chat model is sent', () => {
+    const talk = [
+      message('user', 'שלום'),
+      message('assistant', 'היי!'),
+      message('user', 'חתול על סקייטבורד', { mode: 'draw' }),
+      message('assistant', '', { mode: 'draw', image: picture() }),
+      message('user', 'תודה'),
+    ];
+    expect(toProviderMessages(talk)).toEqual([
+      { role: 'user', content: 'שלום' },
+      { role: 'assistant', content: 'היי!' },
+      { role: 'user', content: 'תודה' },
+    ]);
+  });
+});
+
+describe('sources of a search answer', () => {
+  const chatWith = (sources: unknown, role: StoredMessage['role'] = 'assistant', mode = 'search') => ({
+    id: 'c1',
+    title: 'חיפוש',
+    mode: 'search',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [
+      { id: 'q', role: 'user', text: 'מי המציא את הטלפון?', at: 1, mode: 'search' },
+      { id: 'a', role, text: 'אלכסנדר גרהם בל', at: 2, mode, sources },
+    ],
+  });
+
+  it('are kept with their answer when the chat is read back, as addresses only', () => {
+    const kept = sanitizeChat(chatWith([{ url: 'https://he.wikipedia.org/wiki/x', title: 'כותרת', content: 'טקסט' }]))?.messages[1];
+    expect(kept?.sources).toEqual([{ url: 'https://he.wikipedia.org/wiki/x' }]);
+  });
+
+  it('are dropped when they are not safe addresses, or sit on a message of hers or outside search mode', () => {
+    for (const sources of [[{ url: 'javascript:alert(1)' }], [{ url: 'http://example.com/' }], 'https://example.com/', null, [], [null]]) {
+      expect(sanitizeChat(chatWith(sources))?.messages[1]).not.toHaveProperty('sources');
+    }
+    const good = [{ url: 'https://example.com/' }];
+    expect(sanitizeChat(chatWith(good, 'user'))?.messages[1]).not.toHaveProperty('sources');
+    expect(sanitizeChat(chatWith(good, 'assistant', 'chat'))?.messages[1]).not.toHaveProperty('sources');
+  });
+
+  it('are never sent to a model', () => {
+    const talk = [message('user', 'מי המציא את הטלפון?', { mode: 'search' }), message('assistant', 'בל', { mode: 'search', sources: [{ url: 'https://example.com/' }] }), message('user', 'ומתי?', { mode: 'search' })];
+    expect(JSON.stringify(toProviderMessages(talk))).not.toContain('example.com');
   });
 });
