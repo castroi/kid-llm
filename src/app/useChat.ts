@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AiProviderId } from '../ai/catalog';
 import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
 import type { ChatRequest, ImageRequest } from '../ai/send';
@@ -29,6 +29,18 @@ export interface Services {
   now: () => number;
   newId: () => string;
   copyText: (text: string) => Promise<void>;
+}
+
+/**
+ * How many times the app asks again by itself for one message of hers, when the phone cut
+ * the answer because the app left the screen. Past this she gets the usual "try again".
+ */
+export const MAX_RESUMES = 3;
+
+/** An answer the phone cut while the app was off the screen: how the chat was left, and whether the next call still has to be counted. */
+interface Cut {
+  chat: Chat;
+  countOnFirstPiece: boolean;
 }
 
 export type Notice = { kind: 'error'; reason: AiErrorReason } | { kind: 'limit' } | null;
@@ -104,9 +116,41 @@ export function useChat(services: Services): ChatController {
     if (!services.countMessage()) uncounted.current += 1;
   }, [services]);
 
-  /** Asks the provider for the answer to `base` (which ends with her message) and writes it as it arrives. */
-  const answer = useCallback(
-    async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[] = [], countOnFirstPiece = false) => {
+  // The app leaving the screen and coming back (home screen, another app, a locked phone).
+  // iOS stops a web app's code and its connection soon after it leaves, so an answer being
+  // written then is cut; nothing in a web page can keep it going.
+  /** How many times the app left the screen or came back. */
+  const flips = useRef(0);
+  /** Saves what was written so far, for the answer being written now. */
+  const onHide = useRef<(() => void) | null>(null);
+  /** Calls waiting for the app to be back on the screen. */
+  const waiting = useRef<(() => void)[]>([]);
+  useEffect(() => {
+    const onChange = () => {
+      flips.current += 1;
+      if (document.visibilityState === 'hidden') onHide.current?.();
+      else for (const go of waiting.current.splice(0)) go();
+    };
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+  /** Resolves once the app is on the screen: at once when it already is. */
+  const backOnScreen = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        if (document.visibilityState === 'hidden') waiting.current.push(resolve);
+        else resolve();
+      }),
+    [],
+  );
+
+  /**
+   * One call to the provider for the answer to `base` (which ends with her message), written
+   * as it arrives. Resolves with a `Cut` when the phone cut the call because the app left the
+   * screen and `mayResume` allows asking again; with null in every other case.
+   */
+  const attempt = useCallback(
+    async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[], countOnFirstPiece: boolean, mayResume: boolean): Promise<Cut | null> => {
       const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode };
       let current = withMessage(base, reply);
       let text = '';
@@ -135,6 +179,17 @@ export function useChat(services: Services): ChatController {
       setWriting(true);
       setNotice(null);
       put(current);
+      // `flips` as it was when the last piece arrived on a screen she could see. A call that
+      // fails with a different count was cut by leaving: nothing arrived since she came back.
+      let flipsSeen = flips.current;
+      // The app is leaving the screen: iOS may close it for good, so what was written so far is
+      // saved now, marked as cut off. The end of the answer, if it comes, is saved over it.
+      const saveWritten = () => {
+        if (text === '' || !services.store) return;
+        void services.store.update(withUpdatedMessage(current, { ...reply, text, state: 'failed' })).catch(() => undefined);
+      };
+      onHide.current = saveWritten;
+      let cut: Cut | null = null;
       try {
         if (forMode === 'draw') {
           // A picture is made from her last message alone; nothing else of the chat is sent.
@@ -161,6 +216,7 @@ export function useChat(services: Services): ChatController {
               if (countOnFirstPiece && text === '') count();
               text += piece;
               write();
+              if (document.visibilityState !== 'hidden') flipsSeen = flips.current;
             },
           });
           // The sites a search answer came from are kept with it once it ended well; an answer
@@ -180,9 +236,15 @@ export function useChat(services: Services): ChatController {
           // The provider would not take the request that carried her file (a model that reads no
           // files, or a file it can't open): the file is not sent again, so the chat isn't stuck on it.
           if (reason === 'bad-request' && withFile) put({ ...current, messages: withNewestFileRefused(current.messages) });
-          if (shown.current.id === current.id) setNotice({ kind: 'error', reason });
+          // The phone cut the call while the app was off the screen: she gets no error for
+          // switching apps; the app asks again by itself. Never after her stop (that is `cancelled`).
+          const cutByLeaving = mayResume && (reason === 'network' || reason === 'timeout') && flips.current !== flipsSeen && shown.current.id === current.id;
+          // A call that was to be counted when its answer arrived, and got nothing, is still to be counted.
+          if (cutByLeaving) cut = { chat: current, countOnFirstPiece: countOnFirstPiece && text === '' };
+          else if (shown.current.id === current.id) setNotice({ kind: 'error', reason });
         }
       } finally {
+        if (onHide.current === saveWritten) onHide.current = null;
         if (stopper.current === controller) {
           stopper.current = null;
           busy.current = false;
@@ -190,8 +252,30 @@ export function useChat(services: Services): ChatController {
         }
         keep(current, false);
       }
+      return cut;
     },
     [services, show, keep, count],
+  );
+
+  /**
+   * Asks the provider for the answer to `base` and writes it as it arrives. When the phone
+   * cut the answer because the app left the screen, asks again once she is back, up to
+   * MAX_RESUMES times: the same messages, free of the daily count, replacing what was cut.
+   */
+  const answer = useCallback(
+    async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[] = [], countOnFirstPiece = false) => {
+      for (let resumes = 0; ; resumes++) {
+        const cut = await attempt(base, forMode, settings, apiKey, replaced, countOnFirstPiece, resumes < MAX_RESUMES);
+        if (!cut) return;
+        await backOnScreen();
+        // Only if nothing else happened meanwhile: the same chat is on the screen, as the call left it.
+        if (busy.current || shown.current.id !== cut.chat.id || shown.current.messages !== cut.chat.messages) return;
+        // What was cut is replaced by the new answer, and comes back if the new call brings nothing.
+        replaced = cut.chat.messages.slice(base.messages.length);
+        countOnFirstPiece = cut.countOnFirstPiece;
+      }
+    },
+    [attempt, backOnScreen],
   );
 
   /** True (with the kind notice) when she has used up the day. */
