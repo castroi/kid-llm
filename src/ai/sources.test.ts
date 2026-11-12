@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { MAX_SOURCES, MAX_SOURCE_URL_CHARS, sanitizeSources, siteName } from './sources';
+import { MAX_SITE_CHARS, MAX_SOURCES, MAX_SOURCE_URL_CHARS, sanitizeSources, siteName } from './sources';
 
 describe('sanitizeSources', () => {
   it('keeps only the address of a citation: no title, page text or date', () => {
@@ -29,6 +29,36 @@ describe('sanitizeSources', () => {
     expect(sanitizeSources(bad)).toEqual([]);
   });
 
+  it('drops number addresses, also the phone itself and devices at home, however they are written', () => {
+    const numbers = ['https://192.168.1.1/', 'https://10.0.0.1/', 'https://1.2.3.4/', 'https://127.0.0.1/', 'https://127.1/', 'https://0x7f.1/', 'https://2130706433/', 'https://[::1]/', 'https://[2001:db8::1]/'];
+    expect(sanitizeSources(numbers.map((url) => ({ url })))).toEqual([]);
+  });
+
+  it('drops an address on another port, and hosts that are not an ordinary site name', () => {
+    const odd = [
+      'https://example.com:8443/x',
+      'https://www./',
+      'https://.com/',
+      'https://a..b/',
+      'https://example.com./',
+      'https://www.localhost/',
+      'https://www.com/',
+      'https://a.b.c.d.e.example.com/',
+      `https://${'a'.repeat(MAX_SITE_CHARS)}.example.com/`,
+      'blob:https://example.com/1234',
+      'view-source:https://example.com/',
+    ];
+    for (const url of odd) expect(sanitizeSources([{ url }]), url).toEqual([]);
+    // The usual port written out is the usual port.
+    expect(sanitizeSources([{ url: 'https://example.com:443/x' }])).toEqual([{ url: 'https://example.com/x' }]);
+  });
+
+  it('keeps the address as URL wrote it, never the text as it came', () => {
+    const tricky = sanitizeSources([{ url: '  HTTPS://Example.COM\\a\\b  ' }, { url: 'https://good.example.org\\@evil.example.net/' }, { url: 'ht\ttps://tab.example.io/' }]);
+    expect(tricky).toEqual([{ url: 'https://example.com/a/b' }, { url: 'https://good.example.org/@evil.example.net/' }, { url: 'https://tab.example.io/' }]);
+    expect(tricky.map((source) => siteName(source.url))).toEqual(['example.com', 'good.example.org', 'tab.example.io']);
+  });
+
   it('is empty for anything that is not a list', () => {
     for (const junk of [null, undefined, 'text', 7, {}, { url: 'https://example.com/' }]) expect(sanitizeSources(junk)).toEqual([]);
   });
@@ -54,7 +84,7 @@ describe('siteName', () => {
     expect(siteName('https://аpple.com/')).toMatch(/^xn--/);
   });
 
-  it('is empty for something that is not an address', () => {
-    expect(siteName('nope')).toBe('');
+  it('is empty for something that is not an address that may be linked', () => {
+    for (const bad of ['nope', 'http://example.com/', 'https://192.168.1.1/', 'https://www./', 'https://example.com:8443/', 'javascript:alert(1)']) expect(siteName(bad), bad).toBe('');
   });
 });
