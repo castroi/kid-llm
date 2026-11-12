@@ -131,6 +131,61 @@ test('"delete all chats" really empties the phone\'s database', async ({ page })
   expect(await chatsOnPhone(page)).toBe(0);
 });
 
+test("a parent switches the app to their own use: it is saved, the chat screen says so, and switching back removes it", async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
+  await page.getByRole('button', { name: 'אזור הורים' }).tap();
+  await page.getByLabel('קוד חדש (4 עד 8 ספרות)').fill('2468');
+  await page.getByLabel('שוב, לאימות').fill('2468');
+  await page.getByRole('button', { name: 'שמירת הקוד' }).tap();
+
+  // A child's phone until a parent says otherwise.
+  const box = page.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' });
+  await expect(box).toBeChecked();
+  // The whole row is the touch target, and the built-in instructions can be opened and read.
+  const row = (await page.locator('label.check').boundingBox())!;
+  expect(row.height).toBeGreaterThanOrEqual(48);
+  const summary = page.getByText('הנחיות הבטיחות המובנות, כפי שהן נשלחות');
+  expect((await summary.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+  await summary.tap();
+  await expect(page.getByText('You are talking with a child.', { exact: false })).toBeVisible();
+  const viewport = page.viewportSize()!;
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+
+  await box.uncheck();
+  const warning = page.getByText(/המודל עונה כמו למבוגר/);
+  await expect(warning).toBeVisible();
+  expect(await warning.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(15);
+  await page.getByRole('button', { name: 'שמירה', exact: true }).tap();
+  await expect(page.getByText('נשמר.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (JSON.parse(localStorage.getItem('kid-llm.settings.v1') ?? '{}') as { parentUse?: unknown }).parentUse)).toBe(true);
+
+  await page.getByRole('button', { name: 'סיום' }).tap();
+  const notice = page.getByRole('note');
+  await expect(notice).toHaveText('מצב הורים: הנחיות הבטיחות לילדים כבויות.');
+  expect(await notice.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(15);
+  const strip = (await notice.boundingBox())!;
+  expect(strip.x).toBeGreaterThanOrEqual(0);
+  expect(strip.x + strip.width).toBeLessThanOrEqual(viewport.width);
+  // The message box is still on the screen under it.
+  await expect(page.getByRole('button', { name: 'שליחה' })).toBeInViewport();
+  // It survives closing and opening the app.
+  await page.reload();
+  await expect(page.getByRole('note')).toHaveText('מצב הורים: הנחיות הבטיחות לילדים כבויות.');
+
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
+  await page.getByRole('button', { name: 'אזור הורים' }).tap();
+  await page.getByLabel('קוד הורים', { exact: true }).fill('2468');
+  await page.getByRole('button', { name: 'כניסה' }).tap();
+  await expect(box).not.toBeChecked();
+  await box.check();
+  await page.getByRole('button', { name: 'שמירה', exact: true }).tap();
+  await expect(page.getByText('נשמר.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('kid-llm.settings.v1') ?? '')).not.toContain('parentUse');
+  await page.getByRole('button', { name: 'סיום' }).tap();
+  await expect(page.getByRole('note')).toHaveCount(0);
+});
+
 test('the parent area ends with the version of the app and a link to its commit; the chat screen has no such link', async ({ page }) => {
   await page.goto('/');
   // Her screen never links out of the app.

@@ -120,6 +120,26 @@ describe('settings', () => {
     expect(storage.entries.get(SETTINGS_KEY)).not.toContain('sk-secret');
   });
 
+  it("are a child's unless a parent's own use was saved as exactly `true`", () => {
+    expect(DEFAULT_SETTINGS).not.toHaveProperty('parentUse');
+    expect(sanitizeSettings({ parentUse: true }).parentUse).toBe(true);
+    for (const junk of [false, 'true', 1, 'yes', {}, [], null, undefined]) {
+      expect(sanitizeSettings({ parentUse: junk })).not.toHaveProperty('parentUse');
+    }
+    // What can't be read at all is a child's phone too.
+    expect(loadSettings(memory({ [SETTINGS_KEY]: '{not json' }))).not.toHaveProperty('parentUse');
+    expect(loadSettings(memory())).not.toHaveProperty('parentUse');
+  });
+
+  it("keep a parent's own use across a save, and forget it when it is switched back", () => {
+    const storage = memory();
+    saveSettings({ ...SET_UP, parentUse: true }, storage);
+    expect(loadSettings(storage).parentUse).toBe(true);
+    saveSettings({ ...SET_UP, parentUse: undefined }, storage);
+    expect(loadSettings(storage)).not.toHaveProperty('parentUse');
+    expect(storage.entries.get(SETTINGS_KEY)).not.toContain('parentUse');
+  });
+
   it('accept a daily limit only as a whole number of at least 1, capped', () => {
     expect(sanitizeSettings({ dailyLimit: 20 }).dailyLimit).toBe(20);
     expect(sanitizeSettings({ dailyLimit: 0 }).dailyLimit).toBeNull();

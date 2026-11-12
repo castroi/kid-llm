@@ -25,6 +25,11 @@ export interface Settings {
   childName: string;
   /** The most messages she can send in a day; null = no limit. */
   dailyLimit: number | null;
+  /**
+   * A parent uses the app themself: the built-in child instructions are not sent with a chat.
+   * Absent = the app is used by a child, which is the default and what anything unreadable means.
+   */
+  parentUse?: true;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -65,6 +70,8 @@ export function sanitizeSettings(raw: unknown): Settings {
     systemPrompt: text(value.systemPrompt, MAX_SYSTEM_PROMPT_CHARS),
     childName: text(value.childName, MAX_NAME_CHARS).trim(),
     dailyLimit: typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 ? Math.min(limit, MAX_DAILY_LIMIT) : null,
+    // Only the exact value a parent's untick saves; anything else is a child's phone.
+    ...(value.parentUse === true ? { parentUse: true as const } : {}),
   };
 }
 

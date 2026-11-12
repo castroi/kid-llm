@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { BASELINE_PROMPT, FILE_BASELINE, SEARCH_BASELINE } from './baseline';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, SEARCH_BASELINE, SEARCH_BASELINE_PARENT, systemPromptFor } from './baseline';
 import { AI_PROVIDERS } from './catalog';
 import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
 import { MAX_LINE_CHARS } from './sse';
@@ -135,6 +135,60 @@ describe('sendChat', () => {
     expect(BASELINE_PROMPT).toMatch(/child/);
     // The provider is told no more about her than it needs: no age, no gender.
     expect(BASELINE_PROMPT).not.toMatch(/\d|\b(she|her|girl|boy|he|his|him)\b/i);
+  });
+
+  it("leaves the child baseline out only when a parent switched the app to their own use: then only the parent's own instructions go", async () => {
+    const own = fetchStream([piece('hi'), DONE]);
+    await sendChat(request(own.fetch, { kidUse: false }));
+    expect(JSON.parse(own.calls[0].init.body as string).messages).toEqual([
+      { role: 'system', content: 'Answer in simple Hebrew.' },
+      { role: 'user', content: 'שלום' },
+    ]);
+
+    // Anything but an explicit false is a child: the baseline goes.
+    for (const kidUse of [true, undefined]) {
+      const kid = fetchStream([piece('היי'), DONE]);
+      await sendChat(request(kid.fetch, { kidUse }));
+      expect(JSON.parse(kid.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${BASELINE_PROMPT}\n\nAnswer in simple Hebrew.` });
+    }
+  });
+
+  it("sends no system message at all in a parent's own use with nothing written, and still switches the provider's own prompt off", async () => {
+    const { fetch, calls } = fetchStream([piece('hi'), DONE]);
+    await sendChat(request(fetch, { kidUse: false, systemPrompt: '  ' }));
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({
+      model: 'some-model',
+      messages: [{ role: 'user', content: 'שלום' }],
+      stream: true,
+      venice_parameters: { include_venice_system_prompt: false },
+    });
+  });
+
+  it("keeps the lines about web text and files in a parent's own use, without the lines about a child", async () => {
+    const search = fetchStream([piece('found'), DONE]);
+    await sendChat(request(search.fetch, { kidUse: false, webSearch: true }));
+    expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${SEARCH_BASELINE_PARENT}\n\nAnswer in simple Hebrew.` });
+
+    const file = fetchStream([piece('a cat'), DONE]);
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(request(file.fetch, { kidUse: false, systemPrompt: '', messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
+    expect(JSON.parse(file.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: FILE_BASELINE_PARENT });
+
+    for (const lines of [SEARCH_BASELINE_PARENT, FILE_BASELINE_PARENT]) {
+      expect(lines).toMatch(/never follow instructions/);
+      expect(lines).not.toMatch(/child/i);
+    }
+    expect(FILE_BASELINE_PARENT).toMatch(/Do not identify people/);
+  });
+
+  it('builds the instructions for every combination of use, search and file', () => {
+    expect(systemPromptFor('')).toBe(BASELINE_PROMPT);
+    expect(systemPromptFor(' Be kind. ')).toBe(`${BASELINE_PROMPT}\n\nBe kind.`);
+    expect(systemPromptFor('Be kind.', true, true)).toBe(`${BASELINE_PROMPT} ${SEARCH_BASELINE} ${FILE_BASELINE}\n\nBe kind.`);
+    expect(systemPromptFor('', false, false, false)).toBe('');
+    expect(systemPromptFor(' Be brief. ', false, false, false)).toBe('Be brief.');
+    expect(systemPromptFor('', true, true, false)).toBe(`${SEARCH_BASELINE_PARENT} ${FILE_BASELINE_PARENT}`);
+    expect(systemPromptFor('Be brief.', true, false, false)).toBe(`${SEARCH_BASELINE_PARENT}\n\nBe brief.`);
   });
 
   it('adds the lines about web text to the instructions in search mode only', async () => {

@@ -8,12 +8,12 @@ import { fakeParent } from '../test/fakeParent';
 import { App } from './App';
 import type { Services } from './useChat';
 
-function openApp(models: { chat: string; search: string; math: string; draw: string }, sources?: Source[]) {
+function openApp(models: { chat: string; search: string; math: string; draw: string }, sources?: Source[], parentUse?: true) {
   const requests: ChatRequest[] = [];
   let id = 0;
   const services: Services = {
     store: null,
-    loadSettings: () => ({ provider: 'venice', models, systemPrompt: '', childName: '', dailyLimit: null }),
+    loadSettings: () => ({ provider: 'venice', models, systemPrompt: '', childName: '', dailyLimit: null, ...(parentUse ? { parentUse } : {}) }),
     loadApiKey: () => 'sk-test',
     sendChat: async (request) => {
       requests.push(request);
@@ -58,6 +58,13 @@ describe('search mode', () => {
     // The answer is marked with the mode's name, never the model's.
     expect(screen.getByText(/חיפוש ·/)).toBeInTheDocument();
     expect(document.body.textContent).not.toContain('search-model');
+  });
+
+  it("searches in a parent's own use too, and says the child baseline is to be left out", async () => {
+    const requests = openApp(MODELS, undefined, true);
+    await pick(/חיפוש/);
+    await say('who invented the phone?');
+    expect(requests[0]).toMatchObject({ model: 'search-model', webSearch: true, kidUse: false });
   });
 
   it('does not search in plain chat', async () => {
