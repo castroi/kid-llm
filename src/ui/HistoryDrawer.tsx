@@ -22,7 +22,7 @@ type Editing = { id: string; action: 'menu' | 'rename' } | null;
 
 /**
  * Her chats, sliding in from the side: open one, start a new one, or rename. She can't delete
- * a chat: chats are always kept, and only "delete all" in the parent area removes them.
+ * a chat: only "delete all" in the parent area removes chats.
  * The way into the parent area is at the bottom.
  */
 export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, onNew, onParentArea, onClose }: HistoryDrawerProps) {
