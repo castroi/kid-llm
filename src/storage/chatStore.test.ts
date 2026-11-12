@@ -35,13 +35,13 @@ describe('chat store', () => {
     expect((await store.all()).map((c) => c.title)).toEqual(['שם חדש']);
   });
 
-  it('deletes one chat, or all of them', async () => {
+  it('deletes all the chats at once, and has no way to delete just one', async () => {
     const store = await openChatStore(new IDBFactory());
     await store.save(chat('a', 1));
     await store.save(chat('b', 2));
     await store.save(chat('c', 3));
-    await store.remove('b');
-    expect((await store.list()).map((c) => c.id)).toEqual(['c', 'a']);
+    expect(store).not.toHaveProperty('remove');
+    expect((await store.list()).map((c) => c.id)).toEqual(['c', 'b', 'a']);
     await store.clear();
     expect(await store.all()).toEqual([]);
   });
@@ -58,8 +58,6 @@ describe('chat store', () => {
   it('at the end of an answer, updates a chat only if it is still there: a deleted chat does not come back', async () => {
     const store = await openChatStore(new IDBFactory());
     await store.save(chat('kept', 1));
-    await store.save(chat('gone', 2));
-    await store.remove('gone');
 
     expect(await store.update({ ...chat('kept', 1), title: 'עם תשובה' })).toBe(true);
     expect(await store.update({ ...chat('gone', 2), title: 'חזרתי' })).toBe(false);

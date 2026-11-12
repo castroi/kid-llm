@@ -52,8 +52,6 @@ export interface ChatController {
   openChat: (id: string) => Promise<boolean>;
   /** Gives a saved chat another name. False when it wasn't saved (also while its answer is being written). */
   renameChat: (id: string, title: string) => Promise<boolean>;
-  /** Deletes a saved chat from the phone; if it is the one on the screen, a new chat takes its place. */
-  removeChat: (id: string) => Promise<boolean>;
 }
 
 export function useChat(services: Services): ChatController {
@@ -78,8 +76,8 @@ export function useChat(services: Services): ChatController {
 
   /**
    * Saves to the phone. `created` is her new message (the chat may be new); otherwise it is
-   * the end of an answer, written only if the chat is still there, so a chat deleted
-   * meanwhile doesn't come back.
+   * the end of an answer, written only if the chat is still there, so a chat the parent
+   * deleted meanwhile ("delete all") doesn't come back.
    */
   const keep = useCallback(
     (toSave: Chat, created: boolean) => {
@@ -282,29 +280,10 @@ export function useChat(services: Services): ChatController {
     [services.store, show],
   );
 
-  const removeChat = useCallback(
-    async (id: string): Promise<boolean> => {
-      if (!services.store) return false;
-      // The chat on the screen goes first, so an answer still being written can't save it back:
-      // its last save is asked for after this delete, and finds the chat gone.
-      const wasShown = shown.current.id === id;
-      if (wasShown) leave();
-      try {
-        const removing = services.store.remove(id);
-        if (wasShown) show(newChat(mode, services.now(), services.newId()));
-        await removing;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    [services, mode, show, leave],
-  );
-
   const setMode = useCallback((next: ModeId) => {
     if (isReady(next)) setModeState(next);
   }, []);
 
   const notSaved = services.store === null || unsavedId === chat.id;
-  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat, removeChat };
+  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat };
 }

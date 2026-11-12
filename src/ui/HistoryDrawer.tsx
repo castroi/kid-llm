@@ -13,16 +13,19 @@ export interface HistoryDrawerProps {
   /** Each resolves true when it was done. */
   onOpen: (id: string) => Promise<boolean>;
   onRename: (id: string, title: string) => Promise<boolean>;
-  onRemove: (id: string) => Promise<boolean>;
   onNew: () => void;
   onParentArea: () => void;
   onClose: () => void;
 }
 
-type Editing = { id: string; action: 'menu' | 'rename' | 'remove' } | null;
+type Editing = { id: string; action: 'menu' | 'rename' } | null;
 
-/** Her chats, sliding in from the side: open one, start a new one, rename or delete. The way into the parent area is at the bottom. */
-export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, onRemove, onNew, onParentArea, onClose }: HistoryDrawerProps) {
+/**
+ * Her chats, sliding in from the side: open one, start a new one, or rename. She can't delete
+ * a chat: only "delete all" in the parent area removes chats.
+ * The way into the parent area is at the bottom.
+ */
+export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, onNew, onParentArea, onClose }: HistoryDrawerProps) {
   const drawer = useRef<HTMLElement>(null);
   const [chats, setChats] = useState<ChatSummary[] | null>(null);
   const [editing, setEditing] = useState<Editing>(null);
@@ -58,13 +61,6 @@ export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, o
     if (!newTitle.trim()) return;
     const done = await onRename(id, newTitle);
     setProblem(done ? '' : 'השם לא נשמר.');
-    setEditing(null);
-    load();
-  };
-
-  const remove = async (id: string) => {
-    const done = await onRemove(id);
-    setProblem(done ? '' : 'המחיקה לא הצליחה.');
     setEditing(null);
     load();
   };
@@ -138,9 +134,6 @@ export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, o
                         >
                           שינוי שם
                         </button>
-                        <button type="button" className="button danger" onClick={() => setEditing({ id: chat.id, action: 'remove' })}>
-                          מחיקה
-                        </button>
                       </div>
                     )}
                     {editing?.id === chat.id && editing.action === 'rename' && (
@@ -158,19 +151,6 @@ export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, o
                           </button>
                         </div>
                       </form>
-                    )}
-                    {editing?.id === chat.id && editing.action === 'remove' && (
-                      <div className="confirm drawer-actions">
-                        <p>למחוק את השיחה הזאת? אי אפשר לבטל את זה.</p>
-                        <div className="button-row">
-                          <button type="button" className="button danger" onClick={() => void remove(chat.id)}>
-                            כן, למחוק
-                          </button>
-                          <button type="button" className="button" onClick={() => setEditing(null)}>
-                            ביטול
-                          </button>
-                        </div>
-                      </div>
                     )}
                   </li>
                 ))}
