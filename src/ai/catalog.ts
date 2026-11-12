@@ -14,6 +14,8 @@ export interface AiProvider {
     chat: string;
     /** A cheap authenticated call for "בדיקת חיבור". */
     check: string;
+    /** Makes one picture from a text. */
+    image: string;
   };
 }
 
@@ -24,6 +26,7 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProvider> = {
     endpoints: {
       chat: 'https://api.venice.ai/api/v1/chat/completions',
       check: 'https://api.venice.ai/api/v1/api_keys/rate_limits',
+      image: 'https://api.venice.ai/api/v1/image/generate',
     },
   },
 };

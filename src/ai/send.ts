@@ -1,6 +1,6 @@
-import { systemPromptFor } from './baseline';
+import { imagePromptFor, systemPromptFor } from './baseline';
 import type { AiProviderId } from './catalog';
-import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike } from './providers';
+import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, type GeneratedImage } from './providers';
 
 /**
  * The only way the app calls a provider. It applies the timeout, tells her "עצירה" from
@@ -19,6 +19,8 @@ export const CHAT_IDLE_TIMEOUT_MS = 60_000;
  */
 export const CHAT_NO_TEXT_TIMEOUT_MS = 180_000;
 export const CHECK_TIMEOUT_MS = 20_000;
+/** A picture arrives whole, with nothing in between; this is the longest she waits for one. */
+export const IMAGE_TIMEOUT_MS = 120_000;
 
 const defaultFetch: FetchLike = (url, init) => fetch(url, init);
 
@@ -88,6 +90,8 @@ export interface ChatRequest {
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
   apiKey: string;
+  /** Search mode: look the question up on the web first. What is sent in `messages` then also reaches a search engine, through the provider. */
+  webSearch?: boolean;
   /** Called with each piece of the answer as it arrives, so she sees it being written. */
   onDelta: (text: string) => void;
   /** Her "עצירה". The pieces already given to onDelta stay hers to keep. */
@@ -107,9 +111,10 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
-      systemPrompt: systemPromptFor(req.systemPrompt),
+      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true),
       messages: req.messages,
       apiKey,
+      webSearch: req.webSearch === true,
       signal,
       fetch: req.fetch ?? defaultFetch,
       onDelta: (text) => {
@@ -122,6 +127,36 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   if (result.finishReason === 'content_filter') throw new AiError('refused');
   if (result.text === '') throw new AiError('bad-response', 'no answer text');
   return result;
+}
+
+export interface ImageRequest {
+  provider: AiProviderId;
+  /** The model the parent chose for drawing. */
+  model: string;
+  /** What she asked to draw, as she wrote it. Nothing else of the chat is sent. */
+  prompt: string;
+  apiKey: string;
+  /** Her "עצירה". */
+  signal?: AbortSignal;
+  fetch?: FetchLike;
+  timeoutMs?: number;
+}
+
+/**
+ * Asks the provider for one picture of what she wrote, with safe mode on and the
+ * child-safety line added. Throws AiError with a reason the UI can explain; a picture the
+ * provider blurred or flagged is `refused` and never reaches the screen.
+ */
+export function generateImage(req: ImageRequest): Promise<GeneratedImage> {
+  return withDeadline(req.signal, req.timeoutMs ?? IMAGE_TIMEOUT_MS, async (signal) =>
+    ADAPTERS[req.provider].generateImage({
+      model: req.model,
+      prompt: imagePromptFor(req.prompt),
+      apiKey: usableKey(req.apiKey),
+      signal,
+      fetch: req.fetch ?? defaultFetch,
+    }),
+  );
 }
 
 /** Checks the parent's key against the provider ("בדיקת חיבור"). Resolves with a note to show, if any. */

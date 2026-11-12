@@ -1,9 +1,9 @@
 import { useCallback, useRef, useState } from 'react';
 import type { AiProviderId } from '../ai/catalog';
-import { AiError, type AiErrorReason, type ChatResult } from '../ai/providers';
-import type { ChatRequest } from '../ai/send';
+import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
+import type { ChatRequest, ImageRequest } from '../ai/send';
 import { forgetParsed } from '../core/answerText';
-import { MAX_MESSAGE_CHARS, newChat, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type StoredMessage } from '../core/chat';
+import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
@@ -16,6 +16,8 @@ export interface Services {
   loadSettings: () => Settings;
   loadApiKey: (provider: AiProviderId) => string;
   sendChat: (request: ChatRequest) => Promise<ChatResult>;
+  /** Makes one picture of what she wrote (drawing mode). */
+  generateImage: (request: ImageRequest) => Promise<GeneratedImage>;
   /** How many messages she has sent today, and counting one more (src/storage/usage.ts). */
   sentToday: () => number;
   /** False when the phone refused to write the count. */
@@ -43,6 +45,14 @@ export interface ChatController {
   /** Asks again for an answer to her last message, replacing the last answer. */
   retry: () => void;
   startNewChat: () => void;
+  /** Her saved chats, most recently used first; empty when nothing is kept on this phone. */
+  listChats: () => Promise<ChatSummary[]>;
+  /** Puts a saved chat on the screen. False when it is no longer on the phone. */
+  openChat: (id: string) => Promise<boolean>;
+  /** Gives a saved chat another name. False when it wasn't saved (also while its answer is being written). */
+  renameChat: (id: string, title: string) => Promise<boolean>;
+  /** Deletes a saved chat from the phone; if it is the one on the screen, a new chat takes its place. */
+  removeChat: (id: string) => Promise<boolean>;
 }
 
 export function useChat(services: Services): ChatController {
@@ -50,7 +60,8 @@ export function useChat(services: Services): ChatController {
   const [mode, setModeState] = useState<ModeId>(DEFAULT_MODE);
   const [writing, setWriting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
-  const [notSaved, setNotSaved] = useState(services.store === null);
+  // The chat whose last save failed. The notice belongs to that chat only.
+  const [unsavedId, setUnsavedId] = useState<string | null>(null);
   // Messages the phone refused to count; the limit still holds until the app is closed.
   const uncounted = useRef(0);
 
@@ -76,9 +87,9 @@ export function useChat(services: Services): ChatController {
       saving.then(
         // "Saved" only after a write that really happened; update() writes nothing when the chat is gone.
         (written) => {
-          if (written) setNotSaved(false);
+          if (written) setUnsavedId((id) => (id === toSave.id ? null : id));
         },
-        () => setNotSaved(true),
+        () => setUnsavedId(toSave.id),
       );
     },
     [services.store],
@@ -94,12 +105,13 @@ export function useChat(services: Services): ChatController {
       const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode };
       let current = withMessage(base, reply);
       let text = '';
+      let image: GeneratedImage | undefined;
       // If she moved to another chat meanwhile, this one keeps being written in the background only.
       const put = (next: Chat) => {
         current = next;
         if (shown.current.id === next.id) show(next);
       };
-      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, state ? { ...reply, text, state } : { ...reply, text }));
+      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, { ...reply, text, ...(image ? { image } : {}), ...(state ? { state } : {}) }));
       // Nothing new was written: the empty answer goes, and an answer this call was meant to replace comes back.
       const drop = () => put({ ...current, messages: [...base.messages, ...replaced] });
 
@@ -110,20 +122,36 @@ export function useChat(services: Services): ChatController {
       setNotice(null);
       put(current);
       try {
-        await services.sendChat({
-          provider: settings.provider,
-          model: settings.models[forMode],
-          systemPrompt: settings.systemPrompt,
-          messages: toProviderMessages(base.messages),
-          apiKey,
-          signal: controller.signal,
-          onDelta: (piece) => {
-            // Another answer to the same message counts toward the day only once it really arrives.
-            if (countOnFirstPiece && text === '') count();
-            text += piece;
-            write();
-          },
-        });
+        if (forMode === 'draw') {
+          // A picture is made from her last message alone; nothing else of the chat is sent.
+          image = await services.generateImage({
+            provider: settings.provider,
+            model: settings.models.draw,
+            prompt: base.messages[base.messages.length - 1].text,
+            apiKey,
+            signal: controller.signal,
+          });
+          // Another picture for the same request counts toward the day once it really arrives.
+          if (countOnFirstPiece) count();
+        } else {
+          await services.sendChat({
+            provider: settings.provider,
+            model: settings.models[forMode],
+            systemPrompt: settings.systemPrompt,
+            // A search call carries only what she wrote in search mode (and its answers): what she
+            // said in other modes of the same chat is not handed to a search engine.
+            messages: toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages),
+            apiKey,
+            webSearch: forMode === 'search',
+            signal: controller.signal,
+            onDelta: (piece) => {
+              // Another answer to the same message counts toward the day only once it really arrives.
+              if (countOnFirstPiece && text === '') count();
+              text += piece;
+              write();
+            },
+          });
+        }
         write();
       } catch (err) {
         // Anything unexpected is shown like a broken answer; the provider's own text never reaches her.
@@ -180,38 +208,98 @@ export function useChat(services: Services): ChatController {
   const stop = useCallback(() => stopper.current?.abort(), []);
 
   const retry = useCallback(() => {
-    if (busy.current || !isReady(mode)) return;
+    if (busy.current) return;
     const messages = shown.current.messages;
     let last = messages.length - 1;
     while (last >= 0 && messages[last].role !== 'user') last--;
     if (last < 0) return;
+    // Asked again in the mode her message was written in, whatever the picker shows now:
+    // a question from plain chat is never sent to a web search by "try again".
+    const forMode = messages[last].mode;
+    if (!isReady(forMode)) return;
     const settings = services.loadSettings();
     const apiKey = services.loadApiKey(settings.provider);
-    if (missingFor(mode, settings, apiKey)) return;
+    if (missingFor(forMode, settings, apiKey)) return;
     // The answers after her last message are replaced by the new one, once it starts to arrive.
     const base = { ...shown.current, messages: messages.slice(0, last + 1) };
     const replaced = messages.slice(last + 1);
-    if (toProviderMessages(base.messages).length === 0) return;
+    if (forMode !== 'draw' && toProviderMessages(base.messages).length === 0) return;
     // Trying again after a failure is free. Asking for another answer when one arrived is
     // a paid call like any message: it stops at the limit, and counts once the new answer arrives.
-    const hadAnswer = replaced.some((m) => m.text.trim() !== '' && m.state !== 'failed');
+    const hadAnswer = replaced.some((m) => (m.text.trim() !== '' || m.image !== undefined) && m.state !== 'failed');
     if (hadAnswer && overLimit(settings)) return;
-    void answer(base, mode, settings, apiKey, replaced, hadAnswer);
-  }, [services, mode, answer, overLimit]);
+    void answer(base, forMode, settings, apiKey, replaced, hadAnswer);
+  }, [services, answer, overLimit]);
 
-  const startNewChat = useCallback(() => {
+  /** Leaves the chat on the screen: an answer being written is stopped (what was written is kept with its chat). */
+  const leave = useCallback(() => {
     stopper.current?.abort();
     stopper.current = null;
     busy.current = false;
     setWriting(false);
     setNotice(null);
     forgetParsed();
+  }, []);
+
+  const startNewChat = useCallback(() => {
+    leave();
     show(newChat(mode, services.now(), services.newId()));
-  }, [services, mode, show]);
+  }, [services, mode, show, leave]);
+
+  const listChats = useCallback(async (): Promise<ChatSummary[]> => (services.store ? services.store.list() : []), [services.store]);
+
+  const openChat = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (id === shown.current.id) return true;
+      const found = await services.store?.get(id).catch(() => undefined);
+      if (!found) return false;
+      leave();
+      show(found);
+      if (isReady(found.mode)) setModeState(found.mode);
+      return true;
+    },
+    [services.store, show, leave],
+  );
+
+  const renameChat = useCallback(
+    async (id: string, title: string): Promise<boolean> => {
+      // While its answer is being written the chat is about to be saved again; the name waits.
+      if (!services.store || !title.trim() || (busy.current && shown.current.id === id)) return false;
+      try {
+        const name = titleFrom(title);
+        const written = await services.store.rename(id, name);
+        if (written && shown.current.id === id) show({ ...shown.current, title: name });
+        return written;
+      } catch {
+        return false;
+      }
+    },
+    [services.store, show],
+  );
+
+  const removeChat = useCallback(
+    async (id: string): Promise<boolean> => {
+      if (!services.store) return false;
+      // The chat on the screen goes first, so an answer still being written can't save it back:
+      // its last save is asked for after this delete, and finds the chat gone.
+      const wasShown = shown.current.id === id;
+      if (wasShown) leave();
+      try {
+        const removing = services.store.remove(id);
+        if (wasShown) show(newChat(mode, services.now(), services.newId()));
+        await removing;
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [services, mode, show, leave],
+  );
 
   const setMode = useCallback((next: ModeId) => {
     if (isReady(next)) setModeState(next);
   }, []);
 
-  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat };
+  const notSaved = services.store === null || unsavedId === chat.id;
+  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat, removeChat };
 }

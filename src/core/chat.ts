@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../ai/providers';
+import { IMAGE_TYPES, MAX_IMAGE_BYTES, type ChatMessage, type GeneratedImage, type ImageType } from '../ai/providers';
 import { MODES, type ModeId } from './modes';
 import { cut } from './text';
 
@@ -16,6 +16,8 @@ export interface StoredMessage {
    * `stopped` she pressed "עצירה" (the text so far is kept); `failed` the call failed.
    */
   state?: 'stopped' | 'failed';
+  /** The picture, when this is the answer to a drawing request. Its bytes are kept with the chat, on the phone only. */
+  image?: GeneratedImage;
 }
 
 /** One conversation, kept whole in one record on the phone. */
@@ -75,14 +77,17 @@ export const MAX_CONTEXT_CHARS = 24_000;
 
 /**
  * The conversation as it is sent to the provider: oldest first, ending with her newest
- * message. Left out: answers that failed, empty messages, and anything that is not hers
- * or an answer (a stored record can't add instructions of its own). Messages in a row
- * from the same side are joined, because some models refuse two in a row. When the
+ * message. Left out: answers that failed, empty messages, anything that is not hers or an
+ * answer (a stored record can't add instructions of its own), and everything from drawing
+ * mode. Messages in a row from the same side are joined, because some models refuse two
+ * in a row. When the
  * conversation is longer than `maxChars`, the oldest messages are dropped; her newest
  * always goes, cut to `maxChars`. Empty when there is nothing of hers to answer.
  */
 export function toProviderMessages(messages: readonly StoredMessage[], maxChars: number = MAX_CONTEXT_CHARS): ChatMessage[] {
-  const known = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string');
+  // Drawing requests and their pictures are not part of the talk: a picture can't be sent
+  // as text, and its request alone would look like a question nobody answered.
+  const known = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.mode !== 'draw');
   // An answer that failed or has no text yet is no answer: the question before it still waits.
   const real = known.filter((m) => m.role === 'user' || (m.text.trim() !== '' && m.state !== 'failed'));
   // Only a conversation that ends with a message of hers has something to answer; a
@@ -106,6 +111,15 @@ export function toProviderMessages(messages: readonly StoredMessage[], maxChars:
   return kept;
 }
 
+/** A stored picture as it may be shown: one of the known picture types, with bytes of a sane size. Otherwise null. */
+function sanitizeImage(raw: unknown): GeneratedImage | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const { type, bytes } = raw as Record<string, unknown>;
+  if (typeof type !== 'string' || !(IMAGE_TYPES as readonly string[]).includes(type)) return null;
+  if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0 || bytes.byteLength > MAX_IMAGE_BYTES) return null;
+  return { type: type as ImageType, bytes };
+}
+
 const MODE_IDS: readonly string[] = MODES.map((m) => m.id);
 const isMode = (value: unknown): value is ModeId => typeof value === 'string' && MODE_IDS.includes(value);
 const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
@@ -127,6 +141,8 @@ export function sanitizeChat(raw: unknown): Chat | null {
     if ((m.role !== 'user' && m.role !== 'assistant') || typeof m.id !== 'string' || typeof m.text !== 'string') continue;
     const message: StoredMessage = { id: m.id, role: m.role, text: m.text, at: isTime(m.at) ? m.at : value.createdAt, mode: isMode(m.mode) ? m.mode : mode };
     if (m.state === 'stopped' || m.state === 'failed') message.state = m.state;
+    const image = sanitizeImage(m.image);
+    if (image && m.role === 'assistant') message.image = image;
     messages.push(message);
   }
   return {
