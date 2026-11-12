@@ -15,7 +15,7 @@ export interface ChatStore {
   save(chat: Chat): Promise<void>;
   /**
    * Replaces the chat only if it is still on the phone, and says whether it was. For the
-   * end of an answer: if she (or a parent) deleted the chat meanwhile, it must not come back.
+   * end of an answer: if a parent deleted the chats meanwhile, it must not come back.
    */
   update(chat: Chat): Promise<boolean>;
   /**
@@ -23,8 +23,7 @@ export interface ChatStore {
    * that lands just before or after can't be lost. Says whether the chat was there.
    */
   rename(id: string, title: string): Promise<boolean>;
-  remove(id: string): Promise<void>;
-  /** Deletes every chat ("מחיקת כל השיחות"). */
+  /** Deletes every chat ("מחיקת כל השיחות" in the parent area). There is no deleting one chat: she can't, by design. */
   clear(): Promise<void>;
   close(): void;
 }
@@ -157,7 +156,6 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
       });
       return found;
     },
-    remove: (id) => write((store) => store.delete(id)),
     clear: () => write((store) => store.clear()),
     close: () => db.close(),
   };
