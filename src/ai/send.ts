@@ -87,7 +87,7 @@ export interface ChatRequest {
   model: string;
   /** What the parent wrote; may be empty. The baseline instructions are always sent before it. */
   systemPrompt: string;
-  /** The whole conversation so far, oldest first, ending with her new message. */
+  /** The whole conversation so far, oldest first, ending with her new message. A message may carry a file she attached. */
   messages: ChatMessage[];
   apiKey: string;
   /** Search mode: look the question up on the web first. What is sent in `messages` then also reaches a search engine, through the provider. */
@@ -108,11 +108,14 @@ export interface ChatRequest {
  */
 export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const apiKey = usableKey(req.apiKey);
+  // A search call never carries a file: what goes into a search also reaches a search engine.
+  const messages: ChatMessage[] = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
+  const withFile = messages.some((message) => message.file !== undefined);
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
-      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true),
-      messages: req.messages,
+      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true, withFile),
+      messages,
       apiKey,
       webSearch: req.webSearch === true,
       signal,

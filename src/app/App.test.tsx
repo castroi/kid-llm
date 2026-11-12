@@ -53,7 +53,6 @@ function fakeStore(): ChatStore & { saved: Chat[]; updated: Chat[] } {
       return true;
     },
     rename: async () => true,
-    remove: async () => undefined,
     clear: async () => undefined,
     close: () => undefined,
   };
@@ -84,6 +83,7 @@ function open(options: Options = {}) {
       requests.push(request);
       return send(request);
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => sent,
     countMessage: () => {

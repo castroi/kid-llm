@@ -159,3 +159,16 @@ describe('missingFor', () => {
     expect(missingFor('chat', SET_UP, 'sk-secret')).toBeNull();
   });
 });
+
+describe('the model for files', () => {
+  it('is absent until the parent names one, and is kept once named', () => {
+    expect(loadSettings(memory())).not.toHaveProperty('fileModel');
+    expect(sanitizeSettings({ ...SET_UP, fileModel: '   ' })).not.toHaveProperty('fileModel');
+    expect(sanitizeSettings({ ...SET_UP, fileModel: 42 })).not.toHaveProperty('fileModel');
+    const storage = memory();
+    saveSettings({ ...SET_UP, fileModel: ' vision-model ' }, storage);
+    expect(loadSettings(storage).fileModel).toBe('vision-model');
+    expect(sanitizeSettings({ fileModel: 'x'.repeat(MAX_MODEL_CHARS + 50) }).fileModel).toHaveLength(MAX_MODEL_CHARS);
+  });
+});
+

@@ -112,3 +112,16 @@ export const MoreIcon = () => (
     <circle cx="18" cy="12" r="1" fill="currentColor" />
   </Icon>
 );
+
+export const AttachIcon = () => (
+  <Icon>
+    <path d="M20 11.5l-8 8a5 5 0 0 1-7-7l8.5-8.5a3.5 3.5 0 0 1 5 5L10 17.5a2 2 0 0 1-3-3l7.5-7.5" />
+  </Icon>
+);
+
+export const FileIcon = () => (
+  <Icon size={20}>
+    <path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
+    <path d="M14 3v5h5" />
+  </Icon>
+);

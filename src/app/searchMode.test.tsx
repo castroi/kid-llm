@@ -2,12 +2,13 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { ChatRequest } from '../ai/send';
+import type { Source } from '../ai/sources';
 import { SETUP_MESSAGE } from '../core/kidMessages';
 import { fakeParent } from '../test/fakeParent';
 import { App } from './App';
 import type { Services } from './useChat';
 
-function openApp(models: { chat: string; search: string; math: string; draw: string }) {
+function openApp(models: { chat: string; search: string; math: string; draw: string }, sources?: Source[]) {
   const requests: ChatRequest[] = [];
   let id = 0;
   const services: Services = {
@@ -17,8 +18,9 @@ function openApp(models: { chat: string; search: string; math: string; draw: str
     sendChat: async (request) => {
       requests.push(request);
       request.onDelta('תשובה');
-      return { text: 'תשובה', finishReason: 'stop' };
+      return { text: 'תשובה', finishReason: 'stop', ...(sources ? { sources } : {}) };
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => 0,
     countMessage: () => true,
@@ -136,5 +138,28 @@ describe('search mode', () => {
     await screen.findAllByText('תשובה');
     expect(requests[1].model).toBe('search-model');
     expect(requests[1].webSearch).toBe(true);
+  });
+
+  it('shows the sites a search answer came from as links that open outside the app, by site name only', async () => {
+    openApp(MODELS, [{ url: 'https://he.wikipedia.org/wiki/Telephone' }, { url: 'https://www.example.com/page?x=1' }]);
+    await pick(/חיפוש/);
+    await say('מי המציא את הטלפון?');
+    const links = screen.getAllByRole('link');
+    expect(links.map((link) => link.textContent)).toEqual(['he.wikipedia.org', 'example.com']);
+    expect(links.map((link) => link.getAttribute('href'))).toEqual(['https://he.wikipedia.org/wiki/Telephone', 'https://www.example.com/page?x=1']);
+    for (const link of links) {
+      expect(link).toHaveAttribute('target', '_blank');
+      expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+      expect(link).toHaveAttribute('referrerpolicy', 'no-referrer');
+    }
+  });
+
+  it('shows no links when the provider named no sources, and never outside search mode', async () => {
+    const sources = [{ url: 'https://example.com/' }];
+    openApp(MODELS, sources);
+    // Plain chat: whatever the provider returns, nothing becomes a link.
+    await say('שלום');
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByText('מאיפה התשובה:')).not.toBeInTheDocument();
   });
 });

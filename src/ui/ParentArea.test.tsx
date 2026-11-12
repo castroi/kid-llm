@@ -304,11 +304,24 @@ describe('the settings', () => {
     });
   });
 
+  it('lets the parent name a model for files, and says what leaves the phone when she attaches one', async () => {
+    const { phone } = await openSettings();
+    expect(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת')).toHaveValue('');
+    expect(screen.getByText(/ריק = היא לא יכולה לצרף קבצים/)).toBeInTheDocument();
+    expect(screen.getByText(/מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת/)).toBeInTheDocument();
+    expect(screen.getByText(/מסמך נשלח כמו שהוא, עם כל מה שכתוב בו וגם מה שלא רואים בו: שם מי שכתב אותו, הערות, שינויים שנמחקו ותמונות שבתוכו/)).toBeInTheDocument();
+    expect(screen.getByText(/ושוב עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קובץ אחר; כל שליחה כזאת עולה כסף\. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת'), 'vision-model');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.fileModel).toBe('vision-model');
+  });
+
   it('offers a model for every mode, and says what each one sends', async () => {
     await openSettings();
     expect(screen.getByLabelText('מודל למצב "חשבון"')).toBeInTheDocument();
     expect(screen.getByLabelText('מודל למצב "חיפוש"')).toBeInTheDocument();
     expect(screen.getByText(/במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש/)).toBeInTheDocument();
+    expect(screen.getByText(/את האתרים האלה האפליקציה והנחיות הבטיחות לא בודקות: מה שמסנן אותם הוא רק "זמן מסך" של האייפון/)).toBeInTheDocument();
     expect(screen.getByLabelText('מודל למצב "ציור"')).toBeInTheDocument();
     expect(screen.getByText(/במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים\. האפליקציה שומרת את התמונות רק באייפון הזה; בלחיצה ארוכה על תמונה היא יכולה לשמור או לשתף אותה בעצמה/)).toBeInTheDocument();
   });

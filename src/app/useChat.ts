@@ -2,8 +2,10 @@ import { useCallback, useRef, useState } from 'react';
 import type { AiProviderId } from '../ai/catalog';
 import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
 import type { ChatRequest, ImageRequest } from '../ai/send';
+import type { Source } from '../ai/sources';
 import { forgetParsed } from '../core/answerText';
-import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
+import { canAttachIn, type Attachment } from '../core/attachment';
+import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withNewestFileRefused, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
@@ -16,6 +18,8 @@ export interface Services {
   loadSettings: () => Settings;
   loadApiKey: (provider: AiProviderId) => string;
   sendChat: (request: ChatRequest) => Promise<ChatResult>;
+  /** Makes a file she picked ready to attach (src/core/attachment.ts). Rejects with an AttachmentError. */
+  prepareAttachment: (file: File) => Promise<Attachment>;
   /** Makes one picture of what she wrote (drawing mode). */
   generateImage: (request: ImageRequest) => Promise<GeneratedImage>;
   /** How many messages she has sent today, and counting one more (src/storage/usage.ts). */
@@ -38,8 +42,11 @@ export interface ChatController {
   /** The chat on the screen is not on the phone: the last save failed, or the browser has no storage. */
   notSaved: boolean;
   setMode: (mode: ModeId) => void;
-  /** Sends her message. False when nothing was sent (empty, not set up, over the limit, or an answer is being written). */
-  send: (text: string) => boolean;
+  /**
+   * Sends her message, with the file she attached if there is one. False when nothing was sent
+   * (empty, not set up, over the limit, an answer is being written, or a file where none can go).
+   */
+  send: (text: string, attachment?: Attachment) => boolean;
   /** Her "עצירה": ends the answer; what was written stays. */
   stop: () => void;
   /** Asks again for an answer to her last message, replacing the last answer. */
@@ -51,8 +58,6 @@ export interface ChatController {
   openChat: (id: string) => Promise<boolean>;
   /** Gives a saved chat another name. False when it wasn't saved (also while its answer is being written). */
   renameChat: (id: string, title: string) => Promise<boolean>;
-  /** Deletes a saved chat from the phone; if it is the one on the screen, a new chat takes its place. */
-  removeChat: (id: string) => Promise<boolean>;
 }
 
 export function useChat(services: Services): ChatController {
@@ -77,8 +82,8 @@ export function useChat(services: Services): ChatController {
 
   /**
    * Saves to the phone. `created` is her new message (the chat may be new); otherwise it is
-   * the end of an answer, written only if the chat is still there, so a chat deleted
-   * meanwhile doesn't come back.
+   * the end of an answer, written only if the chat is still there, so a chat the parent
+   * deleted meanwhile ("delete all") doesn't come back.
    */
   const keep = useCallback(
     (toSave: Chat, created: boolean) => {
@@ -106,14 +111,23 @@ export function useChat(services: Services): ChatController {
       let current = withMessage(base, reply);
       let text = '';
       let image: GeneratedImage | undefined;
+      let sources: Source[] | undefined;
       // If she moved to another chat meanwhile, this one keeps being written in the background only.
       const put = (next: Chat) => {
         current = next;
         if (shown.current.id === next.id) show(next);
       };
-      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, { ...reply, text, ...(image ? { image } : {}), ...(state ? { state } : {}) }));
+      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, { ...reply, text, ...(image ? { image } : {}), ...(sources ? { sources } : {}), ...(state ? { state } : {}) }));
       // Nothing new was written: the empty answer goes, and an answer this call was meant to replace comes back.
       const drop = () => put({ ...current, messages: [...base.messages, ...replaced] });
+
+      // What a chat call carries. A search call carries only what she wrote in search mode (and
+      // its answers): what she said in other modes of the same chat is not handed to a search engine.
+      const talk = forMode === 'draw' ? [] : toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages);
+      // A call that carries a file goes to the model the parent chose for files. With none
+      // chosen (the parent took it away since), the file stays on the phone and only the text goes.
+      const fileModel = canAttachIn(forMode) ? (settings.fileModel ?? '') : '';
+      const withFile = fileModel !== '' && talk.some((m) => m.file !== undefined);
 
       const controller = new AbortController();
       stopper.current = controller;
@@ -134,13 +148,11 @@ export function useChat(services: Services): ChatController {
           // Another picture for the same request counts toward the day once it really arrives.
           if (countOnFirstPiece) count();
         } else {
-          await services.sendChat({
+          const result = await services.sendChat({
             provider: settings.provider,
-            model: settings.models[forMode],
+            model: withFile ? fileModel : settings.models[forMode],
             systemPrompt: settings.systemPrompt,
-            // A search call carries only what she wrote in search mode (and its answers): what she
-            // said in other modes of the same chat is not handed to a search engine.
-            messages: toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages),
+            messages: withFile ? talk : talk.map(({ role, content }) => ({ role, content })),
             apiKey,
             webSearch: forMode === 'search',
             signal: controller.signal,
@@ -151,6 +163,9 @@ export function useChat(services: Services): ChatController {
               write();
             },
           });
+          // The sites a search answer came from are kept with it once it ended well; an answer
+          // she stopped or that failed has none.
+          if (forMode === 'search' && result.sources && result.sources.length > 0) sources = result.sources;
         }
         write();
       } catch (err) {
@@ -162,6 +177,9 @@ export function useChat(services: Services): ChatController {
         } else {
           if (text) write('failed');
           else drop();
+          // The provider would not take the request that carried her file (a model that reads no
+          // files, or a file it can't open): the file is not sent again, so the chat isn't stuck on it.
+          if (reason === 'bad-request' && withFile) put({ ...current, messages: withNewestFileRefused(current.messages) });
           if (shown.current.id === current.id) setNotice({ kind: 'error', reason });
         }
       } finally {
@@ -187,15 +205,17 @@ export function useChat(services: Services): ChatController {
   );
 
   const send = useCallback(
-    (text: string): boolean => {
+    (text: string, attachment?: Attachment): boolean => {
       const mine = text.trim();
       if (!mine || busy.current || !isReady(mode)) return false;
       const settings = services.loadSettings();
       const apiKey = services.loadApiKey(settings.provider);
       if (missingFor(mode, settings, apiKey)) return false;
+      // A file goes only in the modes that take one, and only when the parent chose a model for files.
+      if (attachment && (!canAttachIn(mode) || !settings.fileModel)) return false;
 
       if (overLimit(settings)) return false;
-      const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode });
+      const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode, ...(attachment ? { attachment } : {}) });
       count();
       show(base);
       keep(base, true);
@@ -277,29 +297,10 @@ export function useChat(services: Services): ChatController {
     [services.store, show],
   );
 
-  const removeChat = useCallback(
-    async (id: string): Promise<boolean> => {
-      if (!services.store) return false;
-      // The chat on the screen goes first, so an answer still being written can't save it back:
-      // its last save is asked for after this delete, and finds the chat gone.
-      const wasShown = shown.current.id === id;
-      if (wasShown) leave();
-      try {
-        const removing = services.store.remove(id);
-        if (wasShown) show(newChat(mode, services.now(), services.newId()));
-        await removing;
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    [services, mode, show, leave],
-  );
-
   const setMode = useCallback((next: ModeId) => {
     if (isReady(next)) setModeState(next);
   }, []);
 
   const notSaved = services.store === null || unsavedId === chat.id;
-  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat, removeChat };
+  return { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat };
 }
