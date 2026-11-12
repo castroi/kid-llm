@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiError } from '../ai/providers';
+import { appVersion } from '../core/version';
 import { fakeParent, type FakePhone } from '../test/fakeParent';
 import { IDLE_CLOSE_MS, ParentArea } from './ParentArea';
 
@@ -389,5 +390,42 @@ describe('data on the phone', () => {
     await userEvent.click(screen.getByRole('button', { name: 'כן, למחוק הכול' }));
     expect(await screen.findByText('המחיקה לא הצליחה. כדאי לנסות שוב.')).toBeInTheDocument();
     expect(onChatsDeleted).not.toHaveBeenCalled();
+  });
+});
+
+describe('the version line', () => {
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+  const link = () => screen.getByRole('link', { name: 'GitHub' });
+
+  it('shows the short commit and when it was made, left to right, and links to that commit outside the app', async () => {
+    await openSettings();
+    const label = screen.getByText('0123456');
+    expect(label.tagName).toBe('BDI');
+    expect(label).toHaveAttribute('dir', 'ltr');
+    const when = new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short' }).format(new Date('2026-11-12T14:05:00+02:00'));
+    expect(screen.getByText(when)).toHaveAttribute('dir', 'ltr');
+
+    expect(link()).toHaveAttribute('href', `https://github.com/castroi/kid-llm/commit/${SHA}`);
+    expect(link()).toHaveAttribute('target', '_blank');
+    expect(link()).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link()).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('says "dev" with no date, and links to the repository, for a build that does not know its commit', async () => {
+    await openSettings({ version: appVersion('', '') });
+    expect(screen.getByText('dev')).toBeInTheDocument();
+    expect(screen.getByText('dev').closest('p')).toHaveTextContent(/^גרסה dev$/);
+    expect(link()).toHaveAttribute('href', 'https://github.com/castroi/kid-llm');
+  });
+
+  it('is not shown before the code is entered: she gets no link out of the app', () => {
+    open({ pin: '2468' });
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByText('0123456')).not.toBeInTheDocument();
+  });
+
+  it('is not shown while a first code is being chosen either', () => {
+    open();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 });

@@ -129,3 +129,34 @@ test('"delete all chats" really empties the phone\'s database', async ({ page })
   await expect(page.getByText('כל השיחות נמחקו מהאייפון.')).toBeVisible();
   expect(await chatsOnPhone(page)).toBe(0);
 });
+
+test('the parent area ends with the version of the app and a link to its commit; the chat screen has no such link', async ({ page }) => {
+  await page.goto('/');
+  // Her screen never links out of the app.
+  await expect(page.getByRole('link', { name: 'GitHub' })).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
+  await page.getByRole('button', { name: 'אזור הורים' }).tap();
+  // Not before a code was chosen.
+  await expect(page.getByRole('link', { name: 'GitHub' })).toHaveCount(0);
+  await page.getByLabel('קוד חדש (4 עד 8 ספרות)').fill('2468');
+  await page.getByLabel('שוב, לאימות').fill('2468');
+  await page.getByRole('button', { name: 'שמירת הקוד' }).tap();
+
+  const link = page.getByRole('link', { name: 'GitHub' });
+  await link.scrollIntoViewIfNeeded();
+  await expect(link).toBeVisible();
+  // Built from a git checkout it names its commit; either way it points into the repository only.
+  expect(await link.getAttribute('href')).toMatch(/^https:\/\/github\.com\/castroi\/kid-llm(\/commit\/[0-9a-f]{40})?$/);
+  expect(await link.getAttribute('rel')).toBe('noopener noreferrer');
+  await expect(page.locator('.version')).toContainText(/גרסה\s*(dev|[0-9a-f]{7})/);
+
+  const viewport = page.viewportSize()!;
+  const size = (await link.boundingBox())!;
+  expect(size.height).toBeGreaterThanOrEqual(48);
+  expect(size.width).toBeGreaterThanOrEqual(48);
+  expect(size.x).toBeGreaterThanOrEqual(0);
+  expect(size.x + size.width).toBeLessThanOrEqual(viewport.width);
+  const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(pageWidth).toBeLessThanOrEqual(viewport.width);
+});
