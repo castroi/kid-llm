@@ -382,6 +382,7 @@ describe('who uses the app', () => {
     expect(screen.getByText(/ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה/)).toBeInTheDocument();
     expect(screen.getByText(/שיחות במצב הזה לא נשמרות באייפון\s+ולא מופיעות ברשימת השיחות שלה/)).toBeInTheDocument();
     expect(screen.getByText(/המצב הזה לא מסתיים מעצמו/)).toBeInTheDocument();
+    expect(screen.getByText(/מגבלת ההודעות היומית חלה גם כאן/)).toBeInTheDocument();
     // Nothing changed on the phone yet.
     expect(phone.settings.parentUse).toBeUndefined();
     await save();

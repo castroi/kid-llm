@@ -282,6 +282,8 @@ export function useChat(services: Services): ChatController {
       if (!found) return false;
       leave();
       show(found);
+      // What is on the screen now is exactly what is on the phone, whatever was said of this chat before.
+      setUnsavedId((unsaved) => (unsaved === found.id ? null : unsaved));
       if (isReady(found.mode)) setModeState(found.mode);
       return true;
     },

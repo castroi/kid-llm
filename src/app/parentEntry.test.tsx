@@ -186,6 +186,66 @@ describe('the way into the parent area', () => {
     expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
   });
 
+  it("drops an answer still being written in a parent's own use when the app goes back to her: not saved, not shown, and her own chat is not called unsaved", async () => {
+    const store = memoryStore();
+    const stopped: AbortSignal[] = [];
+    let call = 0;
+    // Her question is answered at once; the parent's gets half an answer and stays open until it is stopped.
+    const send = (request: ChatRequest) => {
+      if (++call === 1) {
+        request.onDelta('היי!');
+        return Promise.resolve<ChatResult>({ text: 'היי!', finishReason: 'stop' });
+      }
+      return new Promise<ChatResult>((_, reject) => {
+        request.onDelta('half answer');
+        if (request.signal) stopped.push(request.signal);
+        request.signal?.addEventListener('abort', () => reject(new AiError('cancelled')));
+      });
+    };
+    const { phone, requests } = openApp({ store, send });
+    phone.pin = '2468';
+    phone.apiKey = 'sk-parent';
+    phone.settings = { ...phone.settings, models: { ...phone.settings.models, chat: 'kid-model' } };
+    await openParentArea();
+    await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
+    await userEvent.type(screen.getByLabelText('הודעה'), 'שאלה של ילדה');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    expect(await screen.findByText('היי!')).toBeInTheDocument();
+    await waitFor(() => expect(store.chats.size).toBe(1));
+    const hers = JSON.stringify([...store.chats.values()]);
+    const openHerChat = async () => {
+      await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
+      await userEvent.click(await screen.findByRole('button', { name: 'שאלה של ילדה' }));
+      await screen.findByText('היי!');
+    };
+
+    // The parent takes the app, opens her chat and asks; the answer is still being written...
+    phone.settings = { ...phone.settings, parentUse: true };
+    act(() => void window.dispatchEvent(new Event('storage')));
+    await openHerChat();
+    await userEvent.type(screen.getByLabelText('הודעה'), 'grown-up question');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    expect(await screen.findByText('half answer')).toBeInTheDocument();
+    expect(requests[1].kidUse).toBe(false);
+
+    // ...when the app goes back to her.
+    phone.settings = { ...phone.settings, parentUse: undefined };
+    act(() => void window.dispatchEvent(new Event('storage')));
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0].aborted).toBe(true);
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
+    expect(screen.queryByText('half answer')).not.toBeInTheDocument();
+    expect(screen.queryByText('grown-up question', { selector: '.bubble' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    // Nothing of it reached the phone: her chat is as she left it.
+    expect(JSON.stringify([...store.chats.values()])).toBe(hers);
+
+    // She opens her chat: it is what the phone holds, and nothing says otherwise.
+    await openHerChat();
+    expect(screen.queryByText('half answer')).not.toBeInTheDocument();
+    expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
+  });
+
   it('reads the setup again when the app comes back to the screen, so the notice is never stale', async () => {
     const { phone } = openApp();
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
