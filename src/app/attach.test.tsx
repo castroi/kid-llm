@@ -51,6 +51,7 @@ function openApp(options: Options = {}) {
     ...(options.fileModel === '' ? {} : { fileModel: options.fileModel ?? 'vision-model' }),
     ...(options.parentUse ? { parentUse: true as const } : {}),
   };
+  const copyText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
   const services: Services = {
     store: options.store ?? null,
     loadSettings: () => settings,
@@ -71,10 +72,10 @@ function openApp(options: Options = {}) {
     countMessage: () => true,
     now: () => 1_700_000_000_000 + id,
     newId: () => `id-${++id}`,
-    copyText: async () => undefined,
+    copyText,
   };
   render(<App services={services} parent={fakeParent().parent} />);
-  return { requests, picked, settings };
+  return { requests, picked, settings, copyText };
 }
 
 const attachButton = () => screen.queryByRole('button', { name: 'צירוף קובץ' });
@@ -143,6 +144,16 @@ describe('attaching a file', () => {
     await say('what does it say?');
     expect(requests[0]).toMatchObject({ model: 'vision-model', webSearch: false, kidUse: false });
     expect(requests[0].messages).toEqual([{ role: 'user', content: 'what does it say?', file: { kind: 'pdf', bytes: PDF.bytes } }]);
+  });
+
+  it('copies only her words from a message with a file: the file and its name never reach the clipboard', async () => {
+    const { copyText } = openApp();
+    await attach();
+    await say('מה כתוב כאן?');
+    await screen.findByText('תשובה');
+    await userEvent.click(screen.getByRole('button', { name: 'העתקה של מה שכתבתי' }));
+    expect(copyText).toHaveBeenCalledTimes(1);
+    expect(copyText).toHaveBeenCalledWith('מה כתוב כאן?');
   });
 
   it('sends the same file again with a follow-up, and goes back to the mode\'s own model in a new chat', async () => {

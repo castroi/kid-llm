@@ -1,4 +1,5 @@
 import type { ParentServices } from '../app/parentServices';
+import { appVersion, type AppVersion } from '../core/version';
 import type { PinResult } from '../storage/pin';
 import { DEFAULT_SETTINGS, type Settings } from '../storage/settings';
 
@@ -15,6 +16,8 @@ export interface FakePhone {
   checkedWith: string[];
   /** The phone refuses to save. */
   refuses: boolean;
+  /** The build the parent area says it is. */
+  version: AppVersion;
 }
 
 /** A phone in memory for the parent area's tests. `check` stands in for the provider's key check. */
@@ -29,6 +32,7 @@ export function fakeParent(initial: Partial<FakePhone> = {}, check: () => Promis
     tried: [],
     checkedWith: [],
     refuses: false,
+    version: appVersion('0123456789abcdef0123456789abcdef01234567', '2026-11-12T14:05:00+02:00'),
     ...initial,
   };
   const parent: ParentServices = {
@@ -77,6 +81,7 @@ export function fakeParent(initial: Partial<FakePhone> = {}, check: () => Promis
       if (phone.refuses) throw new Error('refused');
       phone.chatsDeleted += 1;
     },
+    version: phone.version,
   };
   return { parent, phone };
 }
