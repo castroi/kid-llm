@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BASELINE_PROMPT, FILE_BASELINE, IMAGE_BASELINE, SEARCH_BASELINE } from '../ai/baseline';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
 import { AiError } from '../ai/providers';
 import { fakeParent, type FakePhone } from '../test/fakeParent';
 import { IDLE_CLOSE_MS, ParentArea } from './ParentArea';
@@ -378,6 +378,10 @@ describe('who uses the app', () => {
     expect(box().checked).toBe(false);
     expect(screen.getByText(/הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר/)).toBeInTheDocument();
     expect(screen.getByText(/חשוב לסמן אותה\s+ולשמור לפני שהאייפון חוזר לילדה/)).toBeInTheDocument();
+    // The parent is told what else goes, that these chats are not kept, and that it doesn't end by itself.
+    expect(screen.getByText(/ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה/)).toBeInTheDocument();
+    expect(screen.getByText(/שיחות במצב הזה לא נשמרות באייפון\s+ולא מופיעות ברשימת השיחות שלה/)).toBeInTheDocument();
+    expect(screen.getByText(/המצב הזה לא מסתיים מעצמו/)).toBeInTheDocument();
     // Nothing changed on the phone yet.
     expect(phone.settings.parentUse).toBeUndefined();
     await save();
@@ -401,7 +405,8 @@ describe('who uses the app', () => {
   it('shows the built-in instructions word for word, as they are sent', async () => {
     await openSettings();
     expect(screen.getByText('הנחיות הבטיחות המובנות, כפי שהן נשלחות')).toBeInTheDocument();
-    for (const lines of [BASELINE_PROMPT, SEARCH_BASELINE, FILE_BASELINE, IMAGE_BASELINE]) {
+    // Everything the app itself adds, for a child and in a parent's own use: nothing is sent that isn't shown here.
+    for (const lines of [BASELINE_PROMPT, SEARCH_BASELINE, FILE_BASELINE, IMAGE_BASELINE, SEARCH_BASELINE_PARENT, FILE_BASELINE_PARENT]) {
       const shown = screen.getByText(lines);
       expect(shown).toHaveAttribute('dir', 'ltr');
       expect(shown.closest('details')).not.toBeNull();

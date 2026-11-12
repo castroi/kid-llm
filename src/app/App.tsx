@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { canAttachIn } from '../core/attachment';
 import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
@@ -30,10 +30,35 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
   // Read when the app opens and again when the parent area closes; every send reads the
   // settings itself, so a change takes effect at once.
   const [setup, setSetup] = useState(() => readSetup(services));
+  // Whose hands the app is in, as the screen last knew it.
+  const parentUse = useRef(setup.parentUse);
+  const refreshSetup = useCallback(() => {
+    const next = readSetup(services);
+    // The app changed hands (her use, or a parent's own): the chat on the screen is not carried
+    // over. She doesn't get a parent's chat to read or continue, and a parent starts a new one.
+    if (next.parentUse !== parentUse.current) {
+      parentUse.current = next.parentUse;
+      startNewChat();
+    }
+    setSetup(next);
+  }, [services, startNewChat]);
   const closeParentArea = useCallback(() => {
-    setSetup(readSetup(services));
+    refreshSetup();
     setInParentArea(false);
-  }, [services]);
+  }, [refreshSetup]);
+  // The settings can also change outside this screen (another tab of the site): read them again
+  // when that happens and whenever the app comes back to the screen, so the notice never goes stale.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshSetup();
+    };
+    window.addEventListener('storage', refreshSetup);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('storage', refreshSetup);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshSetup]);
 
   const blocked = setup.notSetUp.includes(mode);
   const empty = chat.messages.length === 0;

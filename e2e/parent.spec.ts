@@ -152,7 +152,9 @@ test("a parent switches the app to their own use: it is saved, the chat screen s
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
 
   await box.uncheck();
-  await expect(page.getByText(/המודל עונה כמו למבוגר/)).toBeVisible();
+  const warning = page.getByText(/המודל עונה כמו למבוגר/);
+  await expect(warning).toBeVisible();
+  expect(await warning.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(15);
   await page.getByRole('button', { name: 'שמירה', exact: true }).tap();
   await expect(page.getByText('נשמר.', { exact: true })).toBeVisible();
   expect(await page.evaluate(() => (JSON.parse(localStorage.getItem('kid-llm.settings.v1') ?? '{}') as { parentUse?: unknown }).parentUse)).toBe(true);
@@ -160,6 +162,7 @@ test("a parent switches the app to their own use: it is saved, the chat screen s
   await page.getByRole('button', { name: 'סיום' }).tap();
   const notice = page.getByRole('note');
   await expect(notice).toHaveText('מצב הורים: הנחיות הבטיחות לילדים כבויות.');
+  expect(await notice.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(15);
   const strip = (await notice.boundingBox())!;
   expect(strip.x).toBeGreaterThanOrEqual(0);
   expect(strip.x + strip.width).toBeLessThanOrEqual(viewport.width);

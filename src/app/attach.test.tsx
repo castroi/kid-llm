@@ -34,6 +34,7 @@ interface Options {
   fileModel?: string;
   prepare?: (file: File) => Promise<Attachment>;
   store?: ChatStore | null;
+  parentUse?: true;
 }
 
 function openApp(options: Options = {}) {
@@ -48,6 +49,7 @@ function openApp(options: Options = {}) {
     childName: '',
     dailyLimit: null,
     ...(options.fileModel === '' ? {} : { fileModel: options.fileModel ?? 'vision-model' }),
+    ...(options.parentUse ? { parentUse: true as const } : {}),
   };
   const services: Services = {
     store: options.store ?? null,
@@ -133,6 +135,14 @@ describe('attaching a file', () => {
     expect(within(document.querySelector('.bubble') as HTMLElement).getByText('דף עבודה.pdf')).toBeInTheDocument();
     // The answer is marked with the mode's name, never a model's.
     expect(document.body.textContent).not.toContain('vision-model');
+  });
+
+  it("sends a file to the files' model in a parent's own use too, and says the child baseline is to be left out", async () => {
+    const { requests } = openApp({ parentUse: true });
+    await attach();
+    await say('what does it say?');
+    expect(requests[0]).toMatchObject({ model: 'vision-model', webSearch: false, kidUse: false });
+    expect(requests[0].messages).toEqual([{ role: 'user', content: 'what does it say?', file: { kind: 'pdf', bytes: PDF.bytes } }]);
   });
 
   it('sends the same file again with a follow-up, and goes back to the mode\'s own model in a new chat', async () => {

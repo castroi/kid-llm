@@ -463,6 +463,19 @@ describe("a parent's own use", () => {
     expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
   });
 
+  it("writes nothing of a parent's own chat to the phone, and says that the chat isn't saved", async () => {
+    const store = fakeStore();
+    const { requests } = open({ store, settings: { parentUse: true } });
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    await screen.findByText('היי לך!');
+    expect(store.saved).toEqual([]);
+    expect(store.updated).toEqual([]);
+    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+  });
+
   it('asks again without the child baseline on "try again" too', async () => {
     const { requests } = open({ settings: { parentUse: true } });
     await say('שלום');

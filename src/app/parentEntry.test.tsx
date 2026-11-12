@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { AiError, type ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
-import { PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
+import { NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import type { ChatStore } from '../storage/chatStore';
 import { fakeParent } from '../test/fakeParent';
 import { memoryStore } from '../test/memoryStore';
@@ -99,7 +99,8 @@ describe('the way into the parent area', () => {
   });
 
   it("shows the parent's-own-use notice on the chat screen once the parent unticked the box and saved, and drops it when ticked again", async () => {
-    const { phone, requests } = openApp();
+    const store = memoryStore();
+    const { phone, requests } = openApp({ store });
     phone.pin = '2468';
     phone.apiKey = 'sk-parent';
     phone.settings = { ...phone.settings, models: { ...phone.settings.models, chat: 'kid-model' } };
@@ -114,21 +115,95 @@ describe('the way into the parent area', () => {
       await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
     };
 
+    // Her own chat first: it is saved, as always. (Going through the parent area makes the screen read the setup.)
+    await openParentArea();
+    await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
+    await userEvent.type(screen.getByLabelText('הודעה'), 'שאלה של ילדה');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    expect(await screen.findByText('היי!')).toBeInTheDocument();
+    await waitFor(() => expect(store.chats.size).toBe(1));
+    expect(requests[0]).not.toHaveProperty('kidUse');
+    const hers = JSON.stringify([...store.chats.values()]);
+
+    // The parent takes the app: her chat leaves the screen, and the notice is there.
     await userEvent.click(await enter());
     await leave();
     expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
+    expect(screen.queryByText('שאלה של ילדה', { selector: '.bubble' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /על מה נדבר היום/ })).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('הודעה'), 'hello');
     await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
-    expect(await screen.findByText('היי!')).toBeInTheDocument();
-    expect(requests[0].kidUse).toBe(false);
+    await waitFor(() => expect(screen.getAllByText('היי!')).toHaveLength(1));
+    expect(requests[1].kidUse).toBe(false);
+    // Nothing of the parent's chat was written to the phone, and the screen says so.
+    expect(JSON.stringify([...store.chats.values()])).toBe(hers);
+    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
 
+    // Back to her: the parent's chat leaves the screen too, and is in no list.
     await userEvent.click(await enter());
     await leave();
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    expect(screen.queryByText('hello', { selector: '.bubble' })).not.toBeInTheDocument();
+    expect(screen.queryByText('היי!')).not.toBeInTheDocument();
+    expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('הודעה'), 'again');
     await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[2]).not.toHaveProperty('kidUse');
+    await waitFor(() => expect(store.chats.size).toBe(2));
+    expect(JSON.stringify([...store.chats.values()])).not.toContain('hello');
+  });
+
+  it("does not save what a parent adds to one of her saved chats in a parent's own use", async () => {
+    const store = memoryStore();
+    const { phone, requests } = openApp({ store });
+    phone.pin = '2468';
+    phone.apiKey = 'sk-parent';
+    phone.settings = { ...phone.settings, models: { ...phone.settings.models, chat: 'kid-model' } };
+    await openParentArea();
+    await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
+    await userEvent.type(screen.getByLabelText('הודעה'), 'שאלה של ילדה');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    expect(await screen.findByText('היי!')).toBeInTheDocument();
+    await waitFor(() => expect(store.chats.size).toBe(1));
+    const hers = JSON.stringify([...store.chats.values()]);
+
+    // The settings change under the app (as from another tab); the screen catches up when told.
+    phone.settings = { ...phone.settings, parentUse: true };
+    act(() => void window.dispatchEvent(new Event('storage')));
+    expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
+
+    // The parent opens her chat from the list and writes in it.
+    await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'שאלה של ילדה' }));
+    await screen.findByText('היי!');
+    await userEvent.type(screen.getByLabelText('הודעה'), 'grown-up question');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
     await waitFor(() => expect(requests).toHaveLength(2));
-    expect(requests[1]).not.toHaveProperty('kidUse');
+    await waitFor(() => expect(screen.getAllByText('היי!')).toHaveLength(2));
+    expect(requests[1].kidUse).toBe(false);
+    expect(JSON.stringify([...store.chats.values()])).toBe(hers);
+    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('reads the setup again when the app comes back to the screen, so the notice is never stale', async () => {
+    const { phone } = openApp();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    phone.settings = { ...phone.settings, parentUse: true };
+    // Going to the background reads nothing; coming back does.
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    try {
+      act(() => void document.dispatchEvent(new Event('visibilitychange')));
+      expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    }
+    act(() => void document.dispatchEvent(new Event('visibilitychange')));
+    expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
+
+    phone.settings = { ...phone.settings, parentUse: undefined };
+    act(() => void window.dispatchEvent(new Event('storage')));
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 
   it('starts a fresh chat on the screen after the parent deleted every chat', async () => {

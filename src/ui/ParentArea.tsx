@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { BASELINE_PROMPT, FILE_BASELINE, IMAGE_BASELINE, SEARCH_BASELINE } from '../ai/baseline';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
 import { AiError } from '../ai/providers';
 import type { ParentServices } from '../app/parentServices';
@@ -390,7 +390,8 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             </label>
             {draft.parentUse === true ? (
               <p className="hint warning">
-                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת כאן למטה. ציור נשאר במצב בטוח לילדים. מסך הצ'אט מציג "מצב הורים" עד שהתיבה מסומנת שוב. חשוב לסמן אותה
+                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת כאן למטה, ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה. שיחות במצב הזה לא נשמרות באייפון
+                ולא מופיעות ברשימת השיחות שלה, ובמעבר בין המצבים נפתחת שיחה חדשה. ציור נשאר במצב בטוח לילדים. המצב הזה לא מסתיים מעצמו: מסך הצ'אט מציג "מצב הורים" עד שהתיבה מסומנת שוב. חשוב לסמן אותה
                 ולשמור לפני שהאייפון חוזר לילדה.
               </p>
             ) : (
@@ -413,6 +414,14 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
               <p className="hint">עם כל בקשת ציור (תמיד, גם בלי סימון):</p>
               <p className="builtin-text" dir="ltr" lang="en">
                 {IMAGE_BASELINE}
+              </p>
+              <p className="hint">בלי סימון, במצב "חיפוש":</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {SEARCH_BASELINE_PARENT}
+              </p>
+              <p className="hint">בלי סימון, עם קובץ מצורף:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {FILE_BASELINE_PARENT}
               </p>
             </details>
           </div>

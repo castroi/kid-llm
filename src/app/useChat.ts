@@ -84,10 +84,15 @@ export function useChat(services: Services): ChatController {
    * Saves to the phone. `created` is her new message (the chat may be new); otherwise it is
    * the end of an answer, written only if the chat is still there, so a chat the parent
    * deleted meanwhile ("delete all") doesn't come back.
+   *
+   * `parentUse`: the call was made while a parent used the app themself. Nothing of it is
+   * written to the phone, so her list of chats never holds an answer that was written
+   * without the child instructions; the screen says that the chat isn't saved.
    */
   const keep = useCallback(
-    (toSave: Chat, created: boolean) => {
+    (toSave: Chat, created: boolean, parentUse: boolean) => {
       if (!services.store) return;
+      if (parentUse) return setUnsavedId(toSave.id);
       const saving: Promise<boolean> = created ? services.store.save(toSave).then(() => true) : services.store.update(toSave);
       saving.then(
         // "Saved" only after a write that really happened; update() writes nothing when the chat is gone.
@@ -190,7 +195,7 @@ export function useChat(services: Services): ChatController {
           busy.current = false;
           setWriting(false);
         }
-        keep(current, false);
+        keep(current, false, settings.parentUse === true);
       }
     },
     [services, show, keep, count],
@@ -220,7 +225,7 @@ export function useChat(services: Services): ChatController {
       const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode, ...(attachment ? { attachment } : {}) });
       count();
       show(base);
-      keep(base, true);
+      keep(base, true, settings.parentUse === true);
       void answer(base, mode, settings, apiKey);
       return true;
     },
