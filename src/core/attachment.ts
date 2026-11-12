@@ -35,7 +35,7 @@ export class AttachmentError extends Error {
 
 /** Characters that hide in a name or change the order it is shown in, and control characters. */
 // eslint-disable-next-line no-control-regex
-const NOT_FOR_A_NAME = /[\u0000-\u001F\u007F؜​-‏‪-‮⁠-⁩﻿]/g;
+const NOT_FOR_A_NAME = /[\u0000-\u001F\u007F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
 
 /** A file's name as it may be shown: the last part of a path, on one line, without hidden characters, cut short. */
 export function displayName(name: unknown): string {
