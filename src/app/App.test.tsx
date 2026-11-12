@@ -462,6 +462,50 @@ describe('copying', () => {
   });
 });
 
+describe('copying her own message', () => {
+  const mine = () => screen.getByRole('button', { name: 'העתקה של ההודעה שלי' });
+
+  it('copies what she wrote exactly as she wrote it, signs and all, and says so', async () => {
+    const { copyText } = open();
+    await say('כמה זה 2*3*4 ו-**5**?');
+    await screen.findByText('היי לך!');
+    await userEvent.click(mine());
+    expect(copyText).toHaveBeenCalledTimes(1);
+    expect(copyText).toHaveBeenCalledWith('כמה זה 2*3*4 ו-**5**?');
+    expect(await screen.findByText('הועתק!')).toBeInTheDocument();
+    // The answer's own button is still there, and still says what it does.
+    expect(screen.getByRole('button', { name: 'העתקה' })).toBeInTheDocument();
+  });
+
+  it('is there while the answer is still being written', async () => {
+    const { copyText } = open({ send: () => new Promise(() => undefined) });
+    await say('שלום');
+    await userEvent.click(mine());
+    expect(copyText).toHaveBeenCalledWith('שלום');
+  });
+
+  it('gives every message of hers its own button', async () => {
+    const { copyText } = open();
+    await say('ראשונה');
+    await screen.findByText('היי לך!');
+    await say('שנייה');
+    await waitFor(() => expect(screen.getAllByText('היי לך!')).toHaveLength(2));
+    const buttons = screen.getAllByRole('button', { name: 'העתקה של ההודעה שלי' });
+    expect(buttons).toHaveLength(2);
+    await userEvent.click(buttons[0]);
+    expect(copyText).toHaveBeenCalledWith('ראשונה');
+  });
+
+  it('changes nothing when the browser refuses to copy', async () => {
+    const { copyText } = open();
+    copyText.mockRejectedValue(new Error('denied'));
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    await userEvent.click(mine());
+    expect(screen.queryByText('הועתק!')).not.toBeInTheDocument();
+  });
+});
+
 describe('how an answer is shown', () => {
   it('shows maths left to right inside Hebrew, code in its own box, and tags as plain text', async () => {
     open({ send: answers('התשובה: 3/4 = 6/8.\n```\nprint(1)\n```\n<b>לא מודגש</b>') });

@@ -10,7 +10,11 @@ import { CheckIcon, CopyIcon, FileIcon, RetryIcon } from './icons';
 
 const clock = new Intl.DateTimeFormat('he-IL', { hour: '2-digit', minute: '2-digit' });
 
-function CopyButton({ text, copyText }: { text: string; copyText: (text: string) => Promise<void> }) {
+/**
+ * Copies an answer (as clean text) or, with `label`, her own message exactly as she wrote it.
+ * `label` names the button for a screen reader, so the two kinds can be told apart.
+ */
+function CopyButton({ text, copyText, label }: { text: string; copyText: (text: string) => Promise<void>; label?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -21,9 +25,11 @@ function CopyButton({ text, copyText }: { text: string; copyText: (text: string)
     <button
       type="button"
       className="small-button"
+      aria-label={label === undefined || copied ? undefined : label}
       onClick={() => {
-        // Clean text, without the markdown signs. A refusal by the browser changes nothing on screen.
-        copyText(plainText(text)).then(
+        // An answer is copied as clean text, without the markdown signs; her own words are copied
+        // as they are. A refusal by the browser changes nothing on screen.
+        copyText(label === undefined ? plainText(text) : text).then(
           () => setCopied(true),
           () => undefined,
         );
@@ -151,9 +157,13 @@ export function Conversation({ messages, writing, onRetry, copyText }: Conversat
     <div className="conversation">
       {messages.map((message, index) =>
         message.role === 'user' ? (
-          <div key={message.id} className="bubble" dir="auto">
-            {message.attachment && <Attached attachment={message.attachment} />}
-            {message.text}
+          <div key={message.id} className="mine">
+            <div className="bubble" dir="auto">
+              {message.attachment && <Attached attachment={message.attachment} />}
+              {message.text}
+            </div>
+            {/* Only her words are copied; a file she attached never goes to the clipboard. */}
+            <CopyButton text={message.text} copyText={copyText} label="העתקה של ההודעה שלי" />
           </div>
         ) : (
           <Answer key={message.id} message={message} writing={writing} last={index === messages.length - 1} onRetry={onRetry} copyText={copyText} />

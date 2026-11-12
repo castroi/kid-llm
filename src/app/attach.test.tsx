@@ -49,6 +49,7 @@ function openApp(options: Options = {}) {
     dailyLimit: null,
     ...(options.fileModel === '' ? {} : { fileModel: options.fileModel ?? 'vision-model' }),
   };
+  const copyText = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined);
   const services: Services = {
     store: options.store ?? null,
     loadSettings: () => settings,
@@ -69,10 +70,10 @@ function openApp(options: Options = {}) {
     countMessage: () => true,
     now: () => 1_700_000_000_000 + id,
     newId: () => `id-${++id}`,
-    copyText: async () => undefined,
+    copyText,
   };
   render(<App services={services} parent={fakeParent().parent} />);
-  return { requests, picked, settings };
+  return { requests, picked, settings, copyText };
 }
 
 const attachButton = () => screen.queryByRole('button', { name: 'צירוף קובץ' });
@@ -133,6 +134,16 @@ describe('attaching a file', () => {
     expect(within(document.querySelector('.bubble') as HTMLElement).getByText('דף עבודה.pdf')).toBeInTheDocument();
     // The answer is marked with the mode's name, never a model's.
     expect(document.body.textContent).not.toContain('vision-model');
+  });
+
+  it('copies only her words from a message with a file: the file and its name never reach the clipboard', async () => {
+    const { copyText } = openApp();
+    await attach();
+    await say('מה כתוב כאן?');
+    await screen.findByText('תשובה');
+    await userEvent.click(screen.getByRole('button', { name: 'העתקה של ההודעה שלי' }));
+    expect(copyText).toHaveBeenCalledTimes(1);
+    expect(copyText).toHaveBeenCalledWith('מה כתוב כאן?');
   });
 
   it('sends the same file again with a follow-up, and goes back to the mode\'s own model in a new chat', async () => {
