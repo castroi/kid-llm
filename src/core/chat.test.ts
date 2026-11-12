@@ -162,3 +162,53 @@ describe('sanitizeChat', () => {
     }
   });
 });
+
+describe('pictures', () => {
+  const picture = () => ({ type: 'image/webp' as const, bytes: new Uint8Array([1, 2, 3]).buffer });
+  const chatWith = (image: unknown, role: StoredMessage['role'] = 'assistant') => ({
+    id: 'c1',
+    title: 'ציור',
+    mode: 'draw',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [
+      { id: 'q', role: 'user', text: 'חתול על סקייטבורד', at: 1, mode: 'draw' },
+      { id: 'a', role, text: '', at: 2, mode: 'draw', image },
+    ],
+  });
+
+  it('are kept with their answer when the chat is read back', () => {
+    const kept = sanitizeChat(chatWith(picture()))?.messages[1].image;
+    expect(kept?.type).toBe('image/webp');
+    expect(new Uint8Array(kept!.bytes)).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it('are dropped when they are not a picture of a known type and a sane size, or sit on a message of hers', () => {
+    const bad = [
+      { type: 'image/svg+xml', bytes: new Uint8Array([1]).buffer },
+      { type: 'text/html', bytes: new Uint8Array([1]).buffer },
+      { type: 'image/png', bytes: new ArrayBuffer(0) },
+      { type: 'image/png', bytes: 'AAAA' },
+      { type: 'image/png' },
+      'picture',
+      null,
+    ];
+    for (const image of bad) expect(sanitizeChat(chatWith(image))?.messages[1]).not.toHaveProperty('image');
+    expect(sanitizeChat(chatWith(picture(), 'user'))?.messages[1]).not.toHaveProperty('image');
+  });
+
+  it('and the requests for them are left out of what a chat model is sent', () => {
+    const talk = [
+      message('user', 'שלום'),
+      message('assistant', 'היי!'),
+      message('user', 'חתול על סקייטבורד', { mode: 'draw' }),
+      message('assistant', '', { mode: 'draw', image: picture() }),
+      message('user', 'תודה'),
+    ];
+    expect(toProviderMessages(talk)).toEqual([
+      { role: 'user', content: 'שלום' },
+      { role: 'assistant', content: 'היי!' },
+      { role: 'user', content: 'תודה' },
+    ]);
+  });
+});
