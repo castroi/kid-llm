@@ -519,6 +519,24 @@ describe('saving when the app leaves the screen', () => {
     expect(JSON.stringify([...store.chats.values()])).toBe(before);
   });
 
+  it("saves nothing in a parent's own use, and asks again still without the child instructions", async () => {
+    const store = memoryStore();
+    const { calls, phone } = openApp({ store });
+    phone.settings = { ...SETTINGS, parentUse: true };
+    await say('hello');
+    await writes(calls[0], 'half an answer');
+    leaveApp();
+    expect(store.chats.size).toBe(0);
+    comeBack();
+    await breaks(calls[0]);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].request.kidUse).toBe(false);
+    await writes(calls[1], 'whole answer');
+    await finishes(calls[1]);
+    await settle();
+    expect(store.chats.size).toBe(0);
+  });
+
   it('does not bring back a chat the parent deleted meanwhile', async () => {
     const store = memoryStore();
     const { calls } = openApp({ store });

@@ -192,7 +192,8 @@ export function useChat(services: Services): ChatController {
       // The app is leaving the screen: iOS may close it for good, so what was written so far is
       // saved now, marked as cut off. The end of the answer, if it comes, is saved over it.
       const saveWritten = () => {
-        if (text === '' || !services.store) return;
+        // A parent's own chat is never written to the phone (see `keep`), not even half of it.
+        if (text === '' || !services.store || settings.parentUse === true) return;
         void services.store.update(withUpdatedMessage(current, { ...reply, text, state: 'failed' })).catch(() => undefined);
       };
       onHide.current = saveWritten;
