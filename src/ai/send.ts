@@ -109,7 +109,7 @@ export interface ChatRequest {
 export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const apiKey = usableKey(req.apiKey);
   // A search call never carries a file: what goes into a search also reaches a search engine.
-  const messages = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
+  const messages: ChatMessage[] = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
   const withFile = messages.some((message) => message.file !== undefined);
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
