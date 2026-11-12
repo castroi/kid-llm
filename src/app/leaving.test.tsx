@@ -1,8 +1,8 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it } from 'vitest';
-import { AiError, type AiErrorReason, type ChatResult } from '../ai/providers';
-import type { ChatRequest } from '../ai/send';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
+import type { ChatRequest, ImageRequest } from '../ai/send';
 import type { ChatStore } from '../storage/chatStore';
 import type { Settings } from '../storage/settings';
 import { fakeParent } from '../test/fakeParent';
@@ -18,7 +18,7 @@ import { MAX_RESUMES, type Services } from './useChat';
 
 const SETTINGS: Settings = {
   provider: 'venice',
-  models: { chat: 'model-chat', search: 'model-search', math: '', draw: '' },
+  models: { chat: 'model-chat', search: 'model-search', math: '', draw: 'model-draw' },
   systemPrompt: '',
   childName: '',
   dailyLimit: null,
@@ -33,8 +33,18 @@ interface Call {
   fail: (reason: AiErrorReason) => void;
 }
 
+/** One picture request, held open until the test ends it. */
+interface Picture {
+  request: ImageRequest;
+  finish: () => void;
+  fail: (reason: AiErrorReason) => void;
+}
+
+const PICTURE: GeneratedImage = { type: 'image/webp', bytes: new Uint8Array([82, 73, 70, 70]).buffer };
+
 function openApp(options: { store?: ChatStore | null } = {}) {
   const calls: Call[] = [];
+  const pictures: Picture[] = [];
   let sent = 0;
   let id = 0;
   // What a parent may change while she is away.
@@ -50,7 +60,11 @@ function openApp(options: { store?: ChatStore | null } = {}) {
         calls.push({ request, finish: () => resolve({ text: 'whole', finishReason: 'stop' }), fail: (reason) => reject(new AiError(reason)) });
       }),
     prepareAttachment: () => Promise.reject(new Error('no files in this test')),
-    generateImage: () => Promise.reject(new Error('no drawing in this test')),
+    generateImage: (request) =>
+      new Promise<GeneratedImage>((resolve, reject) => {
+        request.signal?.addEventListener('abort', () => reject(new AiError('cancelled')));
+        pictures.push({ request, finish: () => resolve(PICTURE), fail: (reason) => reject(new AiError(reason)) });
+      }),
     sentToday: () => sent,
     countMessage: () => {
       sent += 1;
@@ -61,7 +75,7 @@ function openApp(options: { store?: ChatStore | null } = {}) {
     copyText: async () => undefined,
   };
   render(<App services={services} parent={fakeParent().parent} />);
-  return { calls, phone, sentNow: () => sent };
+  return { calls, pictures, phone, sentNow: () => sent };
 }
 
 async function say(text: string) {
@@ -227,6 +241,8 @@ describe('asking again goes with the setup as it is now', () => {
     phone.settings = { ...SETTINGS, models: { ...SETTINGS.models, chat: '' } };
     await breaks(calls[0], 'timeout');
     comeBack();
+    // The notice is for the reason the call really ended.
+    expect(await screen.findByText('זה לקח יותר מדי זמן. ננסה שוב?')).toBeInTheDocument();
     await settle();
     expect(calls).toHaveLength(1);
   });
@@ -253,6 +269,59 @@ describe('asking again in search mode', () => {
   });
 });
 
+describe('asking again in drawing mode', () => {
+  const createObjectURL = URL.createObjectURL;
+  const revokeObjectURL = URL.revokeObjectURL;
+  beforeAll(() => {
+    // jsdom has no picture addresses of its own.
+    URL.createObjectURL = vi.fn(() => 'blob:picture');
+    URL.revokeObjectURL = vi.fn();
+  });
+  afterAll(() => {
+    URL.createObjectURL = createObjectURL;
+    URL.revokeObjectURL = revokeObjectURL;
+  });
+  const pickDraw = () => userEvent.click(within(screen.getByRole('group', { name: 'מצב' })).getByRole('button', { name: /ציור/ }));
+
+  it('draws again from what she wrote for that picture only, with the drawing model, free of the count', async () => {
+    const { calls, pictures, sentNow } = openApp();
+    await pickDraw();
+    await say('חתול על סקייטבורד');
+    await waitFor(() => expect(pictures).toHaveLength(1));
+    leaveApp();
+    comeBack();
+    await act(async () => pictures[0].fail('network'));
+    await waitFor(() => expect(pictures).toHaveLength(2));
+    expect(pictures[1].request).toMatchObject({ model: 'model-draw', prompt: 'חתול על סקייטבורד' });
+    expect(screen.queryByText(NO_INTERNET)).not.toBeInTheDocument();
+    await act(async () => pictures[1].finish());
+    expect(await screen.findByRole('img', { name: 'התמונה שציירתי' })).toBeInTheDocument();
+    expect(calls).toHaveLength(0);
+    expect(sentNow()).toBe(1);
+  });
+
+  it('counts a paid redraw once, when its picture finally arrives after a cut', async () => {
+    const { pictures, sentNow } = openApp();
+    await pickDraw();
+    await say('דרקון');
+    await act(async () => pictures[0].finish());
+    await screen.findByRole('img', { name: 'התמונה שציירתי' });
+    expect(sentNow()).toBe(1);
+
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await waitFor(() => expect(pictures).toHaveLength(2));
+    leaveApp();
+    comeBack();
+    await act(async () => pictures[1].fail('timeout'));
+    await waitFor(() => expect(pictures).toHaveLength(3));
+    expect(pictures[2].request.prompt).toBe('דרקון');
+    expect(sentNow()).toBe(1);
+    await act(async () => pictures[2].finish());
+    await waitFor(() => expect(sentNow()).toBe(2));
+    expect(screen.getAllByRole('img', { name: 'התמונה שציירתי' })).toHaveLength(1);
+  });
+});
+
 describe('when she does something herself before the app is back', () => {
   it('lets her own new message win: exactly one new call goes out', async () => {
     const { calls } = openApp();
@@ -265,7 +334,8 @@ describe('when she does something herself before the app is back', () => {
     comeBack();
     await settle();
     expect(calls).toHaveLength(2);
-    expect(calls[1].request.messages.at(-1)).toEqual({ role: 'user', content: 'שנייה' });
+    // The first question got no answer, so it goes along with the new one, as always.
+    expect(calls[1].request.messages.at(-1)).toEqual({ role: 'user', content: 'ראשונה\n\nשנייה' });
   });
 
   it('lets her own "try again" win as well', async () => {
