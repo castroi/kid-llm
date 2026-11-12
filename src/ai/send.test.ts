@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, SEARCH_BASELINE, SEARCH_BASELINE_PARENT, systemPromptFor } from './baseline';
 import { AI_PROVIDERS } from './catalog';
 import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
@@ -43,6 +43,20 @@ function streamed(parts: (string | Uint8Array)[], signal: AbortSignal | null | u
     },
   });
   return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+}
+
+/** A body that sends its parts, then never ends and can't be cancelled, as on a connection that already broke. */
+function unclosable(parts: string[]): ReadableStream<Uint8Array> {
+  let next = 0;
+  return new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (next >= parts.length) return new Promise<void>(() => undefined);
+      controller.enqueue(encoder.encode(parts[next++]));
+    },
+    cancel() {
+      throw new TypeError('Load failed');
+    },
+  });
 }
 
 interface Recorded {
@@ -541,6 +555,27 @@ describe('sendChat', () => {
     expect(err.detail).toBe('500');
   });
 
+  it('gives the same results when the connection fails while it is being closed', async () => {
+    const answer: FetchLike = () => Promise.resolve(new Response(unclosable([piece('היי', 'stop'), DONE]), { status: 200 }));
+    await expect(sendChat(request(answer))).resolves.toEqual({ text: 'היי', finishReason: 'stop' });
+
+    const tooLarge: FetchLike = () => Promise.resolve(new Response(unclosable(['y'.repeat(MAX_ERROR_BODY_CHARS + 100)]), { status: 500 }));
+    const err = await reasonOf(sendChat(request(tooLarge)));
+    expect(err.reason).toBe('provider-down');
+    expect(err.detail).toBe('500');
+
+    const stop = new AbortController();
+    const stopped: FetchLike = () => Promise.resolve(new Response(unclosable([piece('פעם ')]), { status: 200 }));
+    const req = request(stopped, { signal: stop.signal });
+    const original = req.onDelta;
+    req.onDelta = (text) => {
+      original(text);
+      stop.abort();
+    };
+    expect((await reasonOf(sendChat(req))).reason).toBe('cancelled');
+    expect(req.deltas).toEqual(['פעם ']);
+  });
+
   it('never puts what she wrote or the instructions into an error', async () => {
     const secretText = 'הסוד שלי';
     const cases: FetchLike[] = [
@@ -580,6 +615,22 @@ describe('sendChat', () => {
 });
 
 describe('checkConnection', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("uses the browser's own fetch when none is given, with the same safe settings", async () => {
+    const calls: Recorded[] = [];
+    vi.stubGlobal('fetch', (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return Promise.resolve(new Response('{}', { status: 200 }));
+    });
+    await expect(checkConnection('venice', KEY)).resolves.toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe(AI_PROVIDERS.venice.endpoints.check);
+    expect(calls[0].init).toMatchObject(SAFE_FETCH);
+  });
+
   it('asks the check endpoint with the key and resolves when it works', async () => {
     const { fetch, calls } = fetchJson(200, { data: {} });
     await expect(checkConnection('venice', KEY, { fetch })).resolves.toBeNull();
