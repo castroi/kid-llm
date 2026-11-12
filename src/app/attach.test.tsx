@@ -141,7 +141,7 @@ describe('attaching a file', () => {
     await attach();
     await say('מה כתוב כאן?');
     await screen.findByText('תשובה');
-    await userEvent.click(screen.getByRole('button', { name: 'העתקה של ההודעה שלי' }));
+    await userEvent.click(screen.getByRole('button', { name: 'העתקה של מה שכתבתי' }));
     expect(copyText).toHaveBeenCalledTimes(1);
     expect(copyText).toHaveBeenCalledWith('מה כתוב כאן?');
   });

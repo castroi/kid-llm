@@ -463,7 +463,7 @@ describe('copying', () => {
 });
 
 describe('copying her own message', () => {
-  const mine = () => screen.getByRole('button', { name: 'העתקה של ההודעה שלי' });
+  const mine = () => screen.getByRole('button', { name: 'העתקה של מה שכתבתי' });
 
   it('copies what she wrote exactly as she wrote it, signs and all, and says so', async () => {
     const { copyText } = open();
@@ -473,6 +473,9 @@ describe('copying her own message', () => {
     expect(copyText).toHaveBeenCalledTimes(1);
     expect(copyText).toHaveBeenCalledWith('כמה זה 2*3*4 ו-**5**?');
     expect(await screen.findByText('הועתק!')).toBeInTheDocument();
+    // A screen reader hears "copied" too: the button's own name gives way to what it shows.
+    expect(screen.getByRole('button', { name: 'הועתק!' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'העתקה של מה שכתבתי' })).not.toBeInTheDocument();
     // The answer's own button is still there, and still says what it does.
     expect(screen.getByRole('button', { name: 'העתקה' })).toBeInTheDocument();
   });
@@ -490,7 +493,7 @@ describe('copying her own message', () => {
     await screen.findByText('היי לך!');
     await say('שנייה');
     await waitFor(() => expect(screen.getAllByText('היי לך!')).toHaveLength(2));
-    const buttons = screen.getAllByRole('button', { name: 'העתקה של ההודעה שלי' });
+    const buttons = screen.getAllByRole('button', { name: 'העתקה של מה שכתבתי' });
     expect(buttons).toHaveLength(2);
     await userEvent.click(buttons[0]);
     expect(copyText).toHaveBeenCalledWith('ראשונה');

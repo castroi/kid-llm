@@ -163,7 +163,7 @@ export function Conversation({ messages, writing, onRetry, copyText }: Conversat
               {message.text}
             </div>
             {/* Only her words are copied; a file she attached never goes to the clipboard. */}
-            <CopyButton text={message.text} copyText={copyText} label="העתקה של ההודעה שלי" />
+            <CopyButton text={message.text} copyText={copyText} label="העתקה של מה שכתבתי" />
           </div>
         ) : (
           <Answer key={message.id} message={message} writing={writing} last={index === messages.length - 1} onRetry={onRetry} copyText={copyText} />

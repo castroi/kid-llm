@@ -113,8 +113,10 @@ test('her own message has a copy button under it that is big enough to tap and s
   await page.getByRole('button', { name: 'השיחות שלי' }).tap();
   await page.getByRole('dialog', { name: 'השיחות שלי' }).getByRole('button', { name: 'שמיים', exact: true }).tap();
 
-  const mine = page.getByRole('button', { name: 'העתקה של ההודעה שלי' });
+  const mine = page.getByRole('button', { name: 'העתקה של מה שכתבתי' });
   await expect(mine).toBeVisible();
+  // Its name doesn't contain the message box's label ("הודעה"), so getByLabel('הודעה') still finds only the box.
+  await expect(page.getByLabel('הודעה')).toHaveCount(1);
   // The answer keeps its own button, told apart by its name.
   await expect(page.getByRole('button', { name: 'העתקה', exact: true })).toBeVisible();
 
