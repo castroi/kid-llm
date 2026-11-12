@@ -673,6 +673,15 @@ textarea.input {
   color: var(--muted);
 }
 
+/* Which build is on the phone, at the bottom of the parent's settings. */
+.version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+
 .button {
   min-height: 48px;
   padding: 0 16px;
