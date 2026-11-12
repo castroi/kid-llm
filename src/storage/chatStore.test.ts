@@ -70,6 +70,44 @@ describe('chat store', () => {
     expect(await store.all()).toEqual([]);
   });
 
+  it('renames a chat without touching its messages, and says when the chat is gone', async () => {
+    const store = await openChatStore(new IDBFactory());
+    const saved = chat('c1', 100, 'למה השמיים כחולים?');
+    await store.save(saved);
+    expect(await store.rename('c1', 'שאלות על השמיים')).toBe(true);
+    expect(await store.get('c1')).toEqual({ ...saved, title: 'שאלות על השמיים' });
+    expect(await store.rename('gone', 'שם')).toBe(false);
+    expect(await store.get('gone')).toBeUndefined();
+  });
+
+  it('keeps both a rename and a save of new messages that are asked for together', async () => {
+    const store = await openChatStore(new IDBFactory());
+    await store.save(chat('c1', 100));
+    const longer = withMessage(chat('c1', 100), { id: 'c1-2', role: 'assistant', text: 'תשובה', at: 200, mode: 'chat' });
+    // The end of an answer, and a rename asked for right after it.
+    await Promise.all([store.update(longer), store.rename('c1', 'שם חדש')]);
+    expect(await store.get('c1')).toEqual({ ...longer, title: 'שם חדש' });
+  });
+
+  it('keeps a picture with its chat, byte for byte', async () => {
+    const factory = new IDBFactory();
+    const store = await openChatStore(factory);
+    const bytes = new Uint8Array([82, 73, 70, 70, 0, 255, 7]);
+    const withPicture: Chat = {
+      ...chat('c1', 100, 'חתול על סקייטבורד'),
+      messages: [
+        { id: 'q', role: 'user', text: 'חתול על סקייטבורד', at: 100, mode: 'draw' },
+        { id: 'a', role: 'assistant', text: '', at: 101, mode: 'draw', image: { type: 'image/webp', bytes: bytes.buffer } },
+      ],
+    };
+    await store.save(withPicture);
+    store.close();
+    const again = await openChatStore(factory);
+    const image = (await again.get('c1'))?.messages[1].image;
+    expect(image?.type).toBe('image/webp');
+    expect(new Uint8Array(image!.bytes)).toEqual(bytes);
+  });
+
   it('keeps the last of two saves sent one right after the other', async () => {
     const store = await openChatStore(new IDBFactory());
     await Promise.all([store.save({ ...chat('c1', 1), title: 'ראשון' }), store.save({ ...chat('c1', 1), title: 'שני' })]);
