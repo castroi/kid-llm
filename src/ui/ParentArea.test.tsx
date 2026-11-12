@@ -304,6 +304,16 @@ describe('the settings', () => {
     });
   });
 
+  it('lets the parent name a model for files, and says what leaves the phone when she attaches one', async () => {
+    const { phone } = await openSettings();
+    expect(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת')).toHaveValue('');
+    expect(screen.getByText(/ריק = היא לא יכולה לצרף קבצים/)).toBeInTheDocument();
+    expect(screen.getByText(/מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת'), 'vision-model');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.fileModel).toBe('vision-model');
+  });
+
   it('offers a model for every mode, and says what each one sends', async () => {
     await openSettings();
     expect(screen.getByLabelText('מודל למצב "חשבון"')).toBeInTheDocument();

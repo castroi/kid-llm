@@ -84,6 +84,7 @@ function open(options: Options = {}) {
       requests.push(request);
       return send(request);
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => sent,
     countMessage: () => {

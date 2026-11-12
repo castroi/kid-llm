@@ -163,6 +163,60 @@ describe('sanitizeChat', () => {
   });
 });
 
+describe('files she attached', () => {
+  const pdf = () => ({ kind: 'pdf' as const, bytes: new TextEncoder().encode('%PDF-1.7').buffer, name: 'דף עבודה.pdf' });
+  const photo = () => ({ kind: 'image' as const, bytes: new Uint8Array([0xff, 0xd8, 0xff, 1]).buffer, name: '' });
+  const chatWith = (attachment: unknown, role: StoredMessage['role'] = 'user', mode = 'chat') => ({
+    id: 'c1',
+    title: 'דף',
+    mode: 'chat',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [{ id: 'q', role, text: 'מה כתוב כאן?', at: 1, mode, attachment }],
+  });
+
+  it('are kept with her message when the chat is read back', () => {
+    expect(sanitizeChat(chatWith(pdf()))?.messages[0].attachment).toEqual(pdf());
+    expect(sanitizeChat(chatWith(photo(), 'user', 'math'))?.messages[0].attachment).toEqual(photo());
+  });
+
+  it('are dropped when the bytes are not that kind of file, on an answer, or in a mode that takes no file', () => {
+    for (const bad of [{ kind: 'pdf', bytes: new Uint8Array([1, 2, 3]).buffer }, { kind: 'html', bytes: pdf().bytes }, 'file', null]) {
+      expect(sanitizeChat(chatWith(bad))?.messages[0]).not.toHaveProperty('attachment');
+    }
+    expect(sanitizeChat(chatWith(pdf(), 'assistant'))?.messages[0]).not.toHaveProperty('attachment');
+    expect(sanitizeChat(chatWith(pdf(), 'user', 'search'))?.messages[0]).not.toHaveProperty('attachment');
+    expect(sanitizeChat(chatWith(pdf(), 'user', 'draw'))?.messages[0]).not.toHaveProperty('attachment');
+  });
+
+  it('go to the provider with the message they were attached to, without her name for the file', () => {
+    const sent = toProviderMessages([message('user', 'מה כתוב כאן?', { attachment: pdf() })]);
+    expect(sent).toEqual([{ role: 'user', content: 'מה כתוב כאן?', file: { kind: 'pdf', bytes: pdf().bytes } }]);
+    expect(sent[0].file).not.toHaveProperty('name');
+  });
+
+  it('only the newest file is sent again with a later message', () => {
+    const talk = [
+      message('user', 'מה כתוב כאן?', { attachment: pdf() }),
+      message('assistant', 'תרגיל בשברים'),
+      message('user', 'ומה בתמונה?', { attachment: photo() }),
+      message('assistant', 'חתול'),
+      message('user', 'תודה'),
+    ];
+    const sent = toProviderMessages(talk);
+    expect(sent.map((m) => m.file?.kind)).toEqual([undefined, undefined, 'image', undefined, undefined]);
+    // Before she attached the photo, the document was the newest and went with a follow-up.
+    expect(toProviderMessages(talk.slice(0, 2).concat(message('user', 'ושאלה 2?'))).map((m) => m.file?.kind)).toEqual(['pdf', undefined, undefined]);
+  });
+
+  it('stay with her message when it is joined to another of hers, and go away with a message that no longer fits', () => {
+    const joined = toProviderMessages([message('user', 'הנה הדף', { attachment: pdf() }), message('user', 'מה כתוב בו?')]);
+    expect(joined).toEqual([{ role: 'user', content: 'הנה הדף\n\nמה כתוב בו?', file: { kind: 'pdf', bytes: pdf().bytes } }]);
+    const long = [message('user', 'א'.repeat(30), { attachment: pdf() }), message('assistant', 'ב'.repeat(30)), message('user', 'ג'.repeat(30))];
+    expect(toProviderMessages(long, 40).some((m) => m.file !== undefined)).toBe(false);
+  });
+});
+
 describe('pictures', () => {
   const picture = () => ({ type: 'image/webp' as const, bytes: new Uint8Array([1, 2, 3]).buffer });
   const chatWith = (image: unknown, role: StoredMessage['role'] = 'assistant') => ({

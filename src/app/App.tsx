@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react';
+import { canAttachIn } from '../core/attachment';
 import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
 import { missingFor } from '../storage/settings';
@@ -17,7 +18,8 @@ function readSetup(services: Services) {
   const settings = services.loadSettings();
   const apiKey = services.loadApiKey(settings.provider);
   const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
-  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[] };
+  // She can attach a file only once the parent chose a model for files.
+  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && Boolean(settings.fileModel) };
 }
 
 export function App({ services, parent }: { services: Services; parent: ParentServices }) {
@@ -101,7 +103,15 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
         </div>
       </main>
 
-      <Composer mode={mode} writing={writing} blocked={blocked} onSend={send} onStop={stop} onPickMode={() => setPickingMode(true)} />
+      <Composer
+        mode={mode}
+        writing={writing}
+        blocked={blocked}
+        attach={setup.filesReady && !blocked && canAttachIn(mode) ? services.prepareAttachment : null}
+        onSend={send}
+        onStop={stop}
+        onPickMode={() => setPickingMode(true)}
+      />
       </div>
       {pickingMode && <ModeSheet mode={mode} onPick={setMode} onClose={() => setPickingMode(false)} />}
       {inHistory && (

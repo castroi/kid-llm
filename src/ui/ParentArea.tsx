@@ -347,6 +347,28 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
               />
             </div>
           ))}
+          <div className="field">
+            <label htmlFor="model-files">מודל לתמונות ולקבצים שהיא מצרפת</label>
+            <input
+              id="model-files"
+              className="input"
+              type="text"
+              autoComplete="off"
+              autoCapitalize="off"
+              autoCorrect="off"
+              spellCheck={false}
+              dir="ltr"
+              maxLength={MAX_MODEL_CHARS}
+              value={draft.fileModel ?? ''}
+              onChange={(event) => change({ fileModel: event.target.value })}
+            />
+            <p className="hint">
+              ריק = היא לא יכולה לצרף קבצים. עם שם מודל, במצבים "שיחה" ו"חשבון" היא יכולה לצרף להודעה תמונה, PDF או קובץ Word, והקובץ נשלח לספק עם ההודעה. צריך מודל שיודע לקרוא תמונות (vision).
+            </p>
+            <p className="hint">
+              תמונה נשלחת מוקטנת ובלי הנתונים הנסתרים שלה (מיקום, תאריך, סוג הטלפון), אבל מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת. מסמך נשלח כמו שהוא, עם כל מה שכתוב בו. הקבצים נשמרים עם השיחה רק באייפון הזה.
+            </p>
+          </div>
           <p className="hint">שם המודל כפי שהוא מופיע אצל הספק. הילדה רואה רק את שם המצב. כדאי לבחור רק מודלים עם סינון תוכן.</p>
           <p className="hint">במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים. האפליקציה שומרת את התמונות רק באייפון הזה; בלחיצה ארוכה על תמונה היא יכולה לשמור או לשתף אותה בעצמה.</p>
           <p className="hint">תמונה מוצגת רק אם הספק אישר שהיא לא סומנה כלא מתאימה. אם כל בקשת ציור נדחית, ייתכן שהדפדפן לא מצליח לקרוא את האישור הזה מהספק.</p>

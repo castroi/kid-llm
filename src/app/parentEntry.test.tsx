@@ -28,6 +28,7 @@ function openApp(options: { store?: ChatStore; send?: (request: ChatRequest) => 
       request.onDelta('היי!');
       return { text: 'היי!', finishReason: 'stop' };
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => phone.sent,
     countMessage: () => {

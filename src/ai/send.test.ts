@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { BASELINE_PROMPT, SEARCH_BASELINE } from './baseline';
+import { BASELINE_PROMPT, FILE_BASELINE, SEARCH_BASELINE } from './baseline';
 import { AI_PROVIDERS } from './catalog';
 import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
 import { MAX_LINE_CHARS } from './sse';
@@ -181,6 +181,69 @@ describe('sendChat', () => {
     expect((await reasonOf(sendChat(request(none.fetch, { apiKey: '   ' })))).reason).toBe('unauthorized');
     expect((await reasonOf(checkConnection('venice', '', { fetch: none.fetch }))).reason).toBe('unauthorized');
     expect(none.calls).toHaveLength(0);
+  });
+
+  it('sends a picture she attached inside the request, after her text, and adds the lines about files to the instructions', async () => {
+    const { fetch, calls } = fetchStream([piece('זה חתול'), DONE]);
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(calls[0].url).toBe(AI_PROVIDERS.venice.endpoints.chat);
+    expect(body.messages[0].content).toBe(`${BASELINE_PROMPT} ${FILE_BASELINE}\n\nAnswer in simple Hebrew.`);
+    expect(body.messages[1]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'מה יש בתמונה?' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/' } },
+      ],
+    });
+  });
+
+  it('sends a document under a fixed name, never her own file name', async () => {
+    const { fetch, calls } = fetchStream([piece('סיכום'), DONE]);
+    const pdf = new TextEncoder().encode('Hi').buffer;
+    const withName = { kind: 'pdf', bytes: pdf, name: 'נועה כהן כיתה ה2.pdf' } as const;
+    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'תסכמי', file: withName }] }));
+    const sent = calls[0].init.body as string;
+    expect(JSON.parse(sent).messages[1].content[1]).toEqual({ type: 'file', file: { file_data: 'data:application/pdf;base64,SGk=', filename: 'document.pdf' } });
+    expect(sent).not.toContain('נועה');
+
+    const word = fetchStream([piece('סיכום'), DONE]);
+    await sendChat(request(word.fetch, { messages: [{ role: 'user', content: 'תסכמי', file: { kind: 'docx', bytes: pdf } }] }));
+    expect(JSON.parse(word.calls[0].init.body as string).messages[1].content[1].file.filename).toBe('document.docx');
+  });
+
+  it('sends a message without a file as plain text, without the lines about files, and never a file on an answer', async () => {
+    const { fetch, calls } = fetchStream([piece('היי'), DONE]);
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(
+      request(fetch, {
+        messages: [
+          { role: 'user', content: 'שלום' },
+          { role: 'assistant', content: 'היי', file: { kind: 'image', bytes } },
+          { role: 'user', content: 'מה שלומך?' },
+        ],
+      }),
+    );
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(body.messages.slice(1)).toEqual([
+      { role: 'user', content: 'שלום' },
+      { role: 'assistant', content: 'היי' },
+      { role: 'user', content: 'מה שלומך?' },
+    ]);
+    const plain = fetchStream([piece('היי'), DONE]);
+    await sendChat(request(plain.fetch));
+    expect(JSON.parse(plain.calls[0].init.body as string).messages[0].content).not.toContain(FILE_BASELINE);
+  });
+
+  it('never sends a file with a web search', async () => {
+    const { fetch, calls } = fetchStream([piece('מצאתי'), DONE]);
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(request(fetch, { webSearch: true, messages: [{ role: 'user', content: 'מה זה?', file: { kind: 'image', bytes } }] }));
+    const sent = calls[0].init.body as string;
+    expect(JSON.parse(sent).messages[1]).toEqual({ role: 'user', content: 'מה זה?' });
+    expect(sent).not.toContain('base64');
+    expect(JSON.parse(sent).messages[0].content).not.toContain(FILE_BASELINE);
   });
 
   it('puts together a line, and a Hebrew letter, that arrive split between network chunks', async () => {

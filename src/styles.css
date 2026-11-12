@@ -226,6 +226,24 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* What she attached, inside her own message. */
+.attached-picture {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+}
+
+.attached-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
 .answer {
   display: flex;
   flex-direction: column;
@@ -346,6 +364,42 @@ button:disabled {
 
 .composer-input::placeholder {
   color: var(--muted);
+}
+
+/* A file waiting to be sent with the message. */
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline-start: 12px;
+  font-size: 15px;
+  background: var(--accent-tint);
+  border-radius: 14px;
+}
+
+.attachment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-status {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.composer-status:empty {
+  display: none;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .composer-row {

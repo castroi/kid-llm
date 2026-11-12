@@ -3,6 +3,7 @@ import type { AiProviderId } from '../ai/catalog';
 import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
 import type { ChatRequest, ImageRequest } from '../ai/send';
 import { forgetParsed } from '../core/answerText';
+import { canAttachIn, type Attachment } from '../core/attachment';
 import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
@@ -16,6 +17,8 @@ export interface Services {
   loadSettings: () => Settings;
   loadApiKey: (provider: AiProviderId) => string;
   sendChat: (request: ChatRequest) => Promise<ChatResult>;
+  /** Makes a file she picked ready to attach (src/core/attachment.ts). Rejects with an AttachmentError. */
+  prepareAttachment: (file: File) => Promise<Attachment>;
   /** Makes one picture of what she wrote (drawing mode). */
   generateImage: (request: ImageRequest) => Promise<GeneratedImage>;
   /** How many messages she has sent today, and counting one more (src/storage/usage.ts). */
@@ -38,8 +41,11 @@ export interface ChatController {
   /** The chat on the screen is not on the phone: the last save failed, or the browser has no storage. */
   notSaved: boolean;
   setMode: (mode: ModeId) => void;
-  /** Sends her message. False when nothing was sent (empty, not set up, over the limit, or an answer is being written). */
-  send: (text: string) => boolean;
+  /**
+   * Sends her message, with the file she attached if there is one. False when nothing was sent
+   * (empty, not set up, over the limit, an answer is being written, or a file where none can go).
+   */
+  send: (text: string, attachment?: Attachment) => boolean;
   /** Her "עצירה": ends the answer; what was written stays. */
   stop: () => void;
   /** Asks again for an answer to her last message, replacing the last answer. */
@@ -115,6 +121,14 @@ export function useChat(services: Services): ChatController {
       // Nothing new was written: the empty answer goes, and an answer this call was meant to replace comes back.
       const drop = () => put({ ...current, messages: [...base.messages, ...replaced] });
 
+      // What a chat call carries. A search call carries only what she wrote in search mode (and
+      // its answers): what she said in other modes of the same chat is not handed to a search engine.
+      const talk = forMode === 'draw' ? [] : toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages);
+      // A call that carries a file goes to the model the parent chose for files. With none
+      // chosen (the parent took it away since), the file stays on the phone and only the text goes.
+      const fileModel = canAttachIn(forMode) ? (settings.fileModel ?? '') : '';
+      const withFile = fileModel !== '' && talk.some((m) => m.file !== undefined);
+
       const controller = new AbortController();
       stopper.current = controller;
       busy.current = true;
@@ -136,11 +150,9 @@ export function useChat(services: Services): ChatController {
         } else {
           await services.sendChat({
             provider: settings.provider,
-            model: settings.models[forMode],
+            model: withFile ? fileModel : settings.models[forMode],
             systemPrompt: settings.systemPrompt,
-            // A search call carries only what she wrote in search mode (and its answers): what she
-            // said in other modes of the same chat is not handed to a search engine.
-            messages: toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages),
+            messages: withFile ? talk : talk.map(({ role, content }) => ({ role, content })),
             apiKey,
             webSearch: forMode === 'search',
             signal: controller.signal,
@@ -187,15 +199,17 @@ export function useChat(services: Services): ChatController {
   );
 
   const send = useCallback(
-    (text: string): boolean => {
+    (text: string, attachment?: Attachment): boolean => {
       const mine = text.trim();
       if (!mine || busy.current || !isReady(mode)) return false;
       const settings = services.loadSettings();
       const apiKey = services.loadApiKey(settings.provider);
       if (missingFor(mode, settings, apiKey)) return false;
+      // A file goes only in the modes that take one, and only when the parent chose a model for files.
+      if (attachment && (!canAttachIn(mode) || !settings.fileModel)) return false;
 
       if (overLimit(settings)) return false;
-      const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode });
+      const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode, ...(attachment ? { attachment } : {}) });
       count();
       show(base);
       keep(base, true);

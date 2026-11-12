@@ -1,6 +1,7 @@
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, type ChatMessage, type GeneratedImage, type ImageType } from '../ai/providers';
 import { MODES, type ModeId } from './modes';
 import { cut } from './text';
+import { canAttachIn, sanitizeAttachment, type Attachment } from './attachment';
 
 /** One message as it is kept on the phone. */
 export interface StoredMessage {
@@ -11,6 +12,8 @@ export interface StoredMessage {
   at: number;
   /** The mode she was in; shown under an answer instead of a model name. */
   mode: ModeId;
+  /** A picture or a document she attached to this message of hers. Its bytes are kept with the chat, on the phone only. */
+  attachment?: Attachment;
   /**
    * How an answer ended, when it didn't end normally:
    * `stopped` she pressed "עצירה" (the text so far is kept); `failed` the call failed.
@@ -83,6 +86,10 @@ export const MAX_CONTEXT_CHARS = 24_000;
  * in a row. When the
  * conversation is longer than `maxChars`, the oldest messages are dropped; her newest
  * always goes, cut to `maxChars`. Empty when there is nothing of hers to answer.
+ *
+ * Of the files she attached, only the newest one that is still inside the conversation goes,
+ * with the message it was attached to: the provider keeps no file between calls, and
+ * resending every old picture with every message would cost far more than it helps.
  */
 export function toProviderMessages(messages: readonly StoredMessage[], maxChars: number = MAX_CONTEXT_CHARS): ChatMessage[] {
   // Drawing requests and their pictures are not part of the talk: a picture can't be sent
@@ -98,13 +105,17 @@ export function toProviderMessages(messages: readonly StoredMessage[], maxChars:
 
   const kept: ChatMessage[] = [];
   let used = 0;
+  let fileTaken = false;
   for (let i = usable.length - 1; i >= 0; i--) {
-    const { role } = usable[i];
+    const { role, attachment } = usable[i];
     const content = cut(usable[i].text, maxChars);
     if (kept.length > 0 && used + content.length > maxChars) break;
     used += content.length;
-    if (kept[0]?.role === role) kept[0] = { role, content: `${content}\n\n${kept[0].content}` };
-    else kept.unshift({ role, content });
+    // Walking from the newest: the first file met is the newest one. Her name for it stays on the phone.
+    const file = !fileTaken && role === 'user' && attachment ? { kind: attachment.kind, bytes: attachment.bytes } : undefined;
+    if (file) fileTaken = true;
+    if (kept[0]?.role === role) kept[0] = { ...kept[0], content: `${content}\n\n${kept[0].content}`, ...(file ? { file } : {}) };
+    else kept.unshift(file ? { role, content, file } : { role, content });
   }
   // A conversation can't open with an answer whose question was dropped.
   while (kept.length > 1 && kept[0].role === 'assistant') kept.shift();
@@ -140,6 +151,9 @@ export function sanitizeChat(raw: unknown): Chat | null {
     const m = item as Record<string, unknown>;
     if ((m.role !== 'user' && m.role !== 'assistant') || typeof m.id !== 'string' || typeof m.text !== 'string') continue;
     const message: StoredMessage = { id: m.id, role: m.role, text: m.text, at: isTime(m.at) ? m.at : value.createdAt, mode: isMode(m.mode) ? m.mode : mode };
+    // A file is hers only, and only in the modes where she can attach one.
+    const attachment = sanitizeAttachment(m.attachment);
+    if (attachment && m.role === 'user' && canAttachIn(message.mode)) message.attachment = attachment;
     if (m.state === 'stopped' || m.state === 'failed') message.state = m.state;
     const image = sanitizeImage(m.image);
     if (image && m.role === 'assistant') message.image = image;

@@ -4,11 +4,48 @@ import { checkConnection, generateImage, sendChat } from './ai/send';
 import { App } from './app/App';
 import type { ParentServices } from './app/parentServices';
 import type { Services } from './app/useChat';
+import { prepareAttachment, type PickedFile } from './core/attachment';
 import { openChatStore, requestPersistence, type ChatStore } from './storage/chatStore';
 import { checkPin, hasPin, lockedFor, setPin } from './storage/pin';
 import { forgetSetup, hasSetup, loadApiKey, loadSettings, saveApiKey, saveSettings } from './storage/settings';
 import { countMessage, resetUsage, sentToday } from './storage/usage';
 import './styles.css';
+
+/** The longest side of a picture she attaches, in pixels: enough to read a homework sheet, small enough to send. */
+const MAX_PICTURE_SIDE = 1568;
+/** Smaller than this the provider refuses a picture. */
+const MIN_PICTURE_SIDE = 64;
+
+/**
+ * Redraws a picture she picked as a JPEG no larger than MAX_PICTURE_SIDE. Only what is seen
+ * is drawn, so the new picture has none of the photo's hidden data (where and when it was
+ * taken, the phone's model). Rejects when the browser can't open the picture.
+ */
+async function encodeImage(file: PickedFile): Promise<ArrayBuffer> {
+  const address = URL.createObjectURL(file as Blob);
+  try {
+    const picture = new Image();
+    picture.src = address;
+    await picture.decode();
+    const { naturalWidth, naturalHeight } = picture;
+    if (Math.min(naturalWidth, naturalHeight) < MIN_PICTURE_SIDE) throw new Error('picture too small');
+    const scale = Math.min(1, MAX_PICTURE_SIDE / Math.max(naturalWidth, naturalHeight));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(naturalWidth * scale);
+    canvas.height = Math.round(naturalHeight * scale);
+    const pen = canvas.getContext('2d');
+    if (!pen) throw new Error('no canvas');
+    // A see-through background would turn black in a JPEG; paper is white.
+    pen.fillStyle = 'white';
+    pen.fillRect(0, 0, canvas.width, canvas.height);
+    pen.drawImage(picture, 0, 0, canvas.width, canvas.height);
+    const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+    if (!jpeg) throw new Error('no picture');
+    return await jpeg.arrayBuffer();
+  } finally {
+    URL.revokeObjectURL(address);
+  }
+}
 
 /** The real phone and the real provider behind the app (tests give their own). */
 function browserServices(store: ChatStore | null): Services {
@@ -17,6 +54,7 @@ function browserServices(store: ChatStore | null): Services {
     loadSettings: () => loadSettings(),
     loadApiKey: (provider) => loadApiKey(provider),
     sendChat,
+    prepareAttachment: (file) => prepareAttachment(file, encodeImage),
     generateImage,
     sentToday: () => sentToday(Date.now()),
     countMessage: () => countMessage(Date.now()),
