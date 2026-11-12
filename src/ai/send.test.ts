@@ -162,6 +162,37 @@ describe('sendChat', () => {
     expect(JSON.parse(plain.calls[0].init.body as string).venice_parameters).toEqual({ include_venice_system_prompt: false });
   });
 
+  it('returns the sites a search answer came from: addresses only, from whichever chunk carries them', async () => {
+    const citations = [
+      { title: 'כותרת של דף', url: 'https://he.wikipedia.org/wiki/Telephone', content: 'טקסט של דף', date: '2026-01-01T00:00:00Z' },
+      { title: 'bad', url: 'javascript:alert(1)' },
+      { title: 'second', url: 'https://www.example.com/page' },
+    ];
+    const first = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: citations }, choices: [{ delta: { content: '' }, finish_reason: null }] })}\n\n`;
+    const { fetch } = fetchStream([first, piece('מצאתי', 'stop'), DONE]);
+    const result = await sendChat(request(fetch, { webSearch: true }));
+    expect(result).toEqual({ text: 'מצאתי', finishReason: 'stop', sources: [{ url: 'https://he.wikipedia.org/wiki/Telephone' }, { url: 'https://www.example.com/page' }] });
+    expect(JSON.stringify(result)).not.toContain('טקסט של דף');
+    expect(JSON.stringify(result)).not.toContain('כותרת של דף');
+
+    // Later in the stream works too, and a list with nothing usable doesn't hide a later good one.
+    const empty = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: [{ url: 'http://plain.example.com/' }] } })}\n\n`;
+    const late = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: [{ url: 'https://late.example.com/' }] }, choices: [{ delta: { content: '!' }, finish_reason: 'stop' }] })}\n\n`;
+    const second = fetchStream([empty, piece('מצאתי'), late, DONE]);
+    expect((await sendChat(request(second.fetch, { webSearch: true }))).sources).toEqual([{ url: 'https://late.example.com/' }]);
+  });
+
+  it('takes no sources outside search mode, and none from a list it cannot read', async () => {
+    const first = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: [{ url: 'https://example.com/' }] } })}\n\n`;
+    const plain = fetchStream([first, piece('היי', 'stop'), DONE]);
+    expect(await sendChat(request(plain.fetch))).toEqual({ text: 'היי', finishReason: 'stop' });
+
+    for (const junk of [null, 'text', { web_search_citations: 'none' }, { web_search_citations: [null, 7, { url: 5 }] }]) {
+      const odd = fetchStream([`data: ${JSON.stringify({ venice_parameters: junk })}\n\n`, piece('מצאתי', 'stop'), DONE]);
+      expect(await sendChat(request(odd.fetch, { webSearch: true }))).toEqual({ text: 'מצאתי', finishReason: 'stop' });
+    }
+  });
+
   it('never follows a redirect, sends no cookies or referrer, and keeps nothing in the HTTP cache', async () => {
     const { fetch, calls } = fetchStream([piece('היי'), DONE]);
     await sendChat(request(fetch));

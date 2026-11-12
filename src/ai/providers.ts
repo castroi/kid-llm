@@ -1,4 +1,5 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
+import { sanitizeSources, type Source } from './sources';
 import { LineTooLongError, sseData } from './sse';
 
 /**
@@ -68,6 +69,8 @@ export interface ChatResult {
   text: string;
   /** Why the provider stopped ("stop", "length", "content_filter"), when it said. */
   finishReason: string | null;
+  /** Search mode only: the websites the answer was drawn from, when the provider named any (src/ai/sources.ts). */
+  sources?: Source[];
 }
 
 /** A picture as it came from the provider and as it is kept on the phone. */
@@ -213,16 +216,19 @@ function headers(apiKey: string, json: boolean): Record<string, string> {
 interface StreamChunk {
   error?: unknown;
   choices?: { delta?: { content?: unknown }; finish_reason?: unknown }[];
+  /** Venice: the pages a web search found, in `web_search_citations` (its docs: "in the first chunk of a streaming result"). */
+  venice_parameters?: { web_search_citations?: unknown } | null;
 }
 
 /**
  * Reads a streamed chat answer in the OpenAI-compatible format: one JSON chunk per
  * "data:" line with the next piece of text, then "data: [DONE]".
  */
-async function readChatStream(response: Response, { apiKey, signal, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
+async function readChatStream(response: Response, { apiKey, signal, webSearch, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
   if (!response.body) throw new AiError('bad-response', 'no answer body');
   let text = '';
   let finishReason: string | null = null;
+  let sources: Source[] = [];
   // An exception from the screen's own code is not a network failure; it passes through as it is.
   const fromCaller: { thrown: boolean; error?: unknown } = { thrown: false };
   try {
@@ -238,6 +244,9 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
         continue; // a keep-alive or a line we don't know; the text lines still count
       }
       if (chunk?.error) throw new AiError('provider-down', redact(errorMessage(chunk.error), apiKey).slice(0, 300));
+      // Read in search mode only, wherever in the stream they arrive; the first list that
+      // holds a usable address is kept. Only the addresses are taken (src/ai/sources.ts).
+      if (webSearch && sources.length === 0) sources = sanitizeSources(chunk?.venice_parameters?.web_search_citations);
       const choice = chunk?.choices?.[0];
       if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason;
       const delta = choice?.delta?.content;
@@ -260,7 +269,7 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
     if (err instanceof LineTooLongError) throw new AiError('bad-response', 'line too long');
     throw new AiError('network', errorName(err));
   }
-  return { text, finishReason };
+  return sources.length > 0 ? { text, finishReason, sources } : { text, finishReason };
 }
 
 const venice: ProviderAdapter = {

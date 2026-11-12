@@ -1,4 +1,5 @@
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, type ChatMessage, type GeneratedImage, type ImageType } from '../ai/providers';
+import { sanitizeSources, type Source } from '../ai/sources';
 import { MODES, type ModeId } from './modes';
 import { cut } from './text';
 
@@ -18,6 +19,8 @@ export interface StoredMessage {
   state?: 'stopped' | 'failed';
   /** The picture, when this is the answer to a drawing request. Its bytes are kept with the chat, on the phone only. */
   image?: GeneratedImage;
+  /** The websites a search answer was drawn from: addresses only, shown under it as links. Never sent to a model. */
+  sources?: Source[];
 }
 
 /** One conversation, kept whole in one record on the phone. */
@@ -143,6 +146,9 @@ export function sanitizeChat(raw: unknown): Chat | null {
     if (m.state === 'stopped' || m.state === 'failed') message.state = m.state;
     const image = sanitizeImage(m.image);
     if (image && m.role === 'assistant') message.image = image;
+    // Checked again like anything stored: only https addresses, and only on a search answer.
+    const sources = sanitizeSources(m.sources);
+    if (sources.length > 0 && m.role === 'assistant' && message.mode === 'search') message.sources = sources;
     messages.push(message);
   }
   return {

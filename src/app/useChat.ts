@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import type { AiProviderId } from '../ai/catalog';
 import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
 import type { ChatRequest, ImageRequest } from '../ai/send';
+import type { Source } from '../ai/sources';
 import { forgetParsed } from '../core/answerText';
 import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
@@ -104,12 +105,13 @@ export function useChat(services: Services): ChatController {
       let current = withMessage(base, reply);
       let text = '';
       let image: GeneratedImage | undefined;
+      let sources: Source[] | undefined;
       // If she moved to another chat meanwhile, this one keeps being written in the background only.
       const put = (next: Chat) => {
         current = next;
         if (shown.current.id === next.id) show(next);
       };
-      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, { ...reply, text, ...(image ? { image } : {}), ...(state ? { state } : {}) }));
+      const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, { ...reply, text, ...(image ? { image } : {}), ...(sources ? { sources } : {}), ...(state ? { state } : {}) }));
       // Nothing new was written: the empty answer goes, and an answer this call was meant to replace comes back.
       const drop = () => put({ ...current, messages: [...base.messages, ...replaced] });
 
@@ -132,7 +134,7 @@ export function useChat(services: Services): ChatController {
           // Another picture for the same request counts toward the day once it really arrives.
           if (countOnFirstPiece) count();
         } else {
-          await services.sendChat({
+          const result = await services.sendChat({
             provider: settings.provider,
             model: settings.models[forMode],
             systemPrompt: settings.systemPrompt,
@@ -149,6 +151,9 @@ export function useChat(services: Services): ChatController {
               write();
             },
           });
+          // The sites a search answer came from are kept with it once it ended well; an answer
+          // she stopped or that failed has none.
+          if (forMode === 'search' && result.sources && result.sources.length > 0) sources = result.sources;
         }
         write();
       } catch (err) {
