@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_CONTEXT_CHARS, newChat, sanitizeChat, titleFrom, toProviderMessages, UNTITLED, withMessage, withUpdatedMessage, type StoredMessage } from './chat';
+import { MAX_CONTEXT_CHARS, newChat, sanitizeChat, titleFrom, toProviderMessages, UNTITLED, withMessage, withNewestFileRefused, withUpdatedMessage, type StoredMessage } from './chat';
 
 let counter = 0;
 function message(role: StoredMessage['role'], text: string, extra: Partial<StoredMessage> = {}): StoredMessage {
@@ -208,6 +208,26 @@ describe('files she attached', () => {
     expect(sent.map((m) => m.file?.kind)).toEqual([undefined, undefined, 'image', undefined, undefined]);
     // Before she attached the photo, the document was the newest and went with a follow-up.
     expect(toProviderMessages(talk.slice(0, 2).concat(message('user', 'ושאלה 2?'))).map((m) => m.file?.kind)).toEqual(['pdf', undefined, undefined]);
+  });
+
+  it('are not sent again once the provider refused them, and an older file does not come back instead', () => {
+    const talk = [message('user', 'מה כתוב כאן?', { attachment: pdf() }), message('assistant', 'תרגיל'), message('user', 'ומה בתמונה?', { attachment: photo() })];
+    const refused = withNewestFileRefused(talk);
+    expect(refused[2].attachment).toEqual({ ...photo(), refused: true });
+    expect(refused[0].attachment).toEqual(pdf());
+    expect(talk[2].attachment).not.toHaveProperty('refused');
+    expect(toProviderMessages(refused).some((m) => m.file !== undefined)).toBe(false);
+    // Nothing to mark: the messages come back as they were.
+    const plain = [message('user', 'שלום')];
+    expect(withNewestFileRefused(plain)).toEqual(plain);
+    // The mark survives being read back from the phone.
+    const stored = sanitizeChat({ id: 'c', title: 't', mode: 'chat', createdAt: 1, updatedAt: 2, messages: refused });
+    expect(stored?.messages[2].attachment?.refused).toBe(true);
+  });
+
+  it('have their stored name cleaned like anything stored: no path, no hidden characters', () => {
+    const crafted = { ...pdf(), name: '/private/var/mobile/\u202Eevil\u0000name.pdf' };
+    expect(sanitizeChat(chatWith(crafted))?.messages[0].attachment?.name).toBe('evilname.pdf');
   });
 
   it('stay with her message when it is joined to another of hers, and go away with a message that no longer fits', () => {

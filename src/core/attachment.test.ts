@@ -15,6 +15,8 @@ import {
 
 const PDF = new TextEncoder().encode('%PDF-1.7 a homework sheet');
 const ZIP = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 1, 2, 3, 4, 5, 6]);
+/** A zip that holds a Word document's main part, as every .docx does. */
+const DOCX = new Uint8Array([...ZIP, ...new TextEncoder().encode('xxwword/document.xml and the rest')]);
 const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]);
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 9, 9]);
 
@@ -51,9 +53,9 @@ describe('prepareAttachment', () => {
   });
 
   it('takes a Word file: a zip archive named .docx', async () => {
-    const attachment = await prepareAttachment(new File([ZIP], 'חיבור.DOCX', { type: '' }), never());
+    const attachment = await prepareAttachment(new File([DOCX], 'חיבור.DOCX', { type: '' }), never());
     expect(attachment.kind).toBe('docx');
-    expect(new Uint8Array(attachment.bytes)).toEqual(ZIP);
+    expect(new Uint8Array(attachment.bytes)).toEqual(DOCX);
   });
 
   it('redraws a picture and keeps only the redrawn one, without a name', async () => {
@@ -72,7 +74,10 @@ describe('prepareAttachment', () => {
       new File(['<html>'], 'page.html', { type: 'text/html' }),
       new File(['<svg onload="x()"/>'], 'drawing.svg', { type: 'image/svg+xml' }),
       // A zip that isn't named .docx, and something only named .pdf.
-      new File([ZIP], 'archive.zip', { type: 'application/zip' }),
+      new File([DOCX], 'archive.zip', { type: 'application/zip' }),
+      // A zip of something else (photos, say) that was only renamed .docx.
+      new File([ZIP], 'photos.docx', { type: '' }),
+      new File([new Uint8Array([...ZIP, ...new TextEncoder().encode('word/document.xm')])], 'almost.docx', { type: '' }),
       new File(['not a pdf'], 'fake.pdf', { type: 'application/pdf' }),
       new File(['MZ program'], 'fake.docx', { type: '' }),
     ];
@@ -132,6 +137,9 @@ describe('sanitizeAttachment', () => {
     expect(sanitizeAttachment({ kind: 'docx', bytes: ZIP.slice().buffer })).toEqual({ kind: 'docx', bytes: ZIP.slice().buffer, name: '' });
     // A picture has no name, whatever was stored.
     expect(sanitizeAttachment({ kind: 'image', bytes: JPEG.slice().buffer, name: 'IMG_0042.jpg' })).toEqual({ kind: 'image', bytes: JPEG.slice().buffer, name: '' });
+    // A file the provider refused stays marked, so it is not sent again after the app is reopened.
+    expect(sanitizeAttachment({ kind: 'pdf', bytes: PDF.slice().buffer, name: 'a.pdf', refused: true })?.refused).toBe(true);
+    expect(sanitizeAttachment({ kind: 'pdf', bytes: PDF.slice().buffer, name: 'a.pdf', refused: 'yes' })).not.toHaveProperty('refused');
   });
 
   it('drops anything else', () => {

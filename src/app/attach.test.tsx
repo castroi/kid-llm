@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { AiError } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
 import { AttachmentError, type Attachment } from '../core/attachment';
 import { attachmentMessage } from '../core/kidMessages';
@@ -28,6 +29,8 @@ afterAll(() => {
 });
 
 interface Options {
+  /** How the provider answers each call, by its number; it answers "תשובה" otherwise. */
+  fails?: (call: number) => AiError | null;
   fileModel?: string;
   prepare?: (file: File) => Promise<Attachment>;
   store?: ChatStore | null;
@@ -52,6 +55,8 @@ function openApp(options: Options = {}) {
     loadApiKey: () => 'sk-test',
     sendChat: async (request) => {
       requests.push(request);
+      const failure = options.fails?.(requests.length) ?? null;
+      if (failure) throw failure;
       request.onDelta('תשובה');
       return { text: 'תשובה', finishReason: 'stop' };
     },
@@ -222,5 +227,76 @@ describe('attaching a file', () => {
     await say('מה כתוב כאן?');
     await waitFor(() => expect([...store.chats.values()][0]?.messages).toHaveLength(2));
     expect([...store.chats.values()][0].messages[0].attachment).toEqual(PDF);
+  });
+
+  it('asks again with the file on "try again", and never hands it to a search asked again', async () => {
+    const { requests } = openApp();
+    await attach();
+    await say('מה כתוב כאן?');
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1].model).toBe('vision-model');
+    expect(requests[1].messages).toEqual([{ role: 'user', content: 'מה כתוב כאן?', file: { kind: 'pdf', bytes: PDF.bytes } }]);
+
+    await pickFromSheet(/חיפוש/);
+    await say('מי המציא את הטלפון?', 2);
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await waitFor(() => expect(requests).toHaveLength(4));
+    expect(requests[3].webSearch).toBe(true);
+    expect(requests[3].model).toBe('search-model');
+    expect(requests[3].messages).toEqual([{ role: 'user', content: 'מי המציא את הטלפון?' }]);
+  });
+
+  it('sends the file of a chat opened again from her list with a follow-up', async () => {
+    const store = memoryStore([
+      {
+        id: 'old',
+        title: 'דף עבודה',
+        mode: 'chat',
+        createdAt: 1,
+        updatedAt: 2,
+        messages: [
+          { id: 'q', role: 'user', text: 'מה כתוב כאן?', at: 1, mode: 'chat', attachment: PDF },
+          { id: 'a', role: 'assistant', text: 'תרגיל בשברים', at: 2, mode: 'chat' },
+        ],
+      },
+    ]);
+    const { requests } = openApp({ store });
+    await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
+    await userEvent.click(await within(screen.getByRole('dialog', { name: 'השיחות שלי' })).findByRole('button', { name: 'דף עבודה' }));
+    await screen.findByText('תרגיל בשברים');
+    await say('ושאלה 2?');
+    expect(requests[0].model).toBe('vision-model');
+    expect(requests[0].messages[0]).toEqual({ role: 'user', content: 'מה כתוב כאן?', file: { kind: 'pdf', bytes: PDF.bytes } });
+  });
+
+  it('stops sending a file the provider would not take, so the chat is not stuck on it', async () => {
+    const store = memoryStore();
+    const { requests } = openApp({ store, fails: (call) => (call === 1 ? new AiError('bad-request', '400 model does not support files') : null) });
+    await attach();
+    await userEvent.type(screen.getByLabelText('הודעה'), 'מה כתוב כאן?');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    expect(await screen.findByText('משהו לא עובד. כדאי לקרוא לאבא או לאמא.')).toBeInTheDocument();
+    // The provider's own words never reach her.
+    expect(document.body.textContent).not.toContain('does not support');
+    expect(requests[0].messages[0].file).toBeDefined();
+
+    // Her next message goes without the file, to the mode's own model, and is answered.
+    await say('אז בלי הקובץ: מה זה שבר?');
+    expect(requests[1].model).toBe('chat-model');
+    expect(requests[1].messages.some((message) => message.file !== undefined)).toBe(false);
+    // The file is still shown in her message and kept on the phone, marked as refused.
+    expect(within(document.querySelector('.bubble') as HTMLElement).getByText('דף עבודה.pdf')).toBeInTheDocument();
+    await waitFor(() => expect([...store.chats.values()][0]?.messages[0].attachment?.refused).toBe(true));
+  });
+
+  it('keeps sending the file after a failure that is not about the file', async () => {
+    const { requests } = openApp({ fails: (call) => (call === 1 ? new AiError('network') : null) });
+    await attach();
+    await userEvent.type(screen.getByLabelText('הודעה'), 'מה כתוב כאן?');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'ננסה שוב' }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1].messages[0].file).toEqual({ kind: 'pdf', bytes: PDF.bytes });
   });
 });

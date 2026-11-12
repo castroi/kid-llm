@@ -111,15 +111,24 @@ export function toProviderMessages(messages: readonly StoredMessage[], maxChars:
     const content = cut(usable[i].text, maxChars);
     if (kept.length > 0 && used + content.length > maxChars) break;
     used += content.length;
-    // Walking from the newest: the first file met is the newest one. Her name for it stays on the phone.
-    const file = !fileTaken && role === 'user' && attachment ? { kind: attachment.kind, bytes: attachment.bytes } : undefined;
-    if (file) fileTaken = true;
+    // Walking from the newest: the first file met is the newest one, and the only one that may go.
+    // One the provider refused doesn't go again. Her name for the file stays on the phone.
+    const newest = !fileTaken && role === 'user' && attachment !== undefined;
+    if (newest) fileTaken = true;
+    const file = newest && !attachment.refused ? { kind: attachment.kind, bytes: attachment.bytes } : undefined;
     if (kept[0]?.role === role) kept[0] = { ...kept[0], content: `${content}\n\n${kept[0].content}`, ...(file ? { file } : {}) };
     else kept.unshift(file ? { role, content, file } : { role, content });
   }
   // A conversation can't open with an answer whose question was dropped.
   while (kept.length > 1 && kept[0].role === 'assistant') kept.shift();
   return kept;
+}
+
+/** Marks her newest file as refused by the provider, so it is not sent again (see `Attachment.refused`). */
+export function withNewestFileRefused(messages: readonly StoredMessage[]): StoredMessage[] {
+  let index = messages.length - 1;
+  while (index >= 0 && !(messages[index].role === 'user' && messages[index].attachment)) index--;
+  return messages.map((message, i) => (i === index && message.attachment ? { ...message, attachment: { ...message.attachment, refused: true as const } } : message));
 }
 
 /** A stored picture as it may be shown: one of the known picture types, with bytes of a sane size. Otherwise null. */

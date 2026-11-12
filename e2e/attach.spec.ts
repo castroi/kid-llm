@@ -37,8 +37,8 @@ function chunk(type: string, data: Uint8Array): Buffer {
   return Buffer.concat([length, body, sum]);
 }
 
-/** A real PNG of one colour, made here so the test needs no picture file. */
-function png(width: number, height: number): Buffer {
+/** A real PNG of one colour, made here so the test needs no picture file. `hidden` is written into it as a text note, the way a photo carries where it was taken. */
+function png(width: number, height: number, hidden = ''): Buffer {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
@@ -46,7 +46,7 @@ function png(width: number, height: number): Buffer {
   const row = Buffer.alloc(1 + width * 3, 0x66);
   row[0] = 0; // no filter
   const pixels = Buffer.concat(Array.from({ length: height }, () => row));
-  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(pixels)), chunk('IEND', new Uint8Array(0))]);
+  return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), ...(hidden ? [chunk('tEXt', Buffer.from(`Comment\0${hidden}`, 'latin1'))] : []), chunk('IDAT', deflateSync(pixels)), chunk('IEND', new Uint8Array(0))]);
 }
 
 test('without a model for files there is no attach button', async ({ page }) => {
@@ -110,3 +110,69 @@ test('the attach button is not offered in search mode', async ({ page }) => {
   await page.getByRole('group', { name: 'מצב' }).getByRole('button', { name: /חיפוש/ }).tap();
   await expect(page.getByRole('button', { name: 'צירוף קובץ' })).toHaveCount(0);
 });
+
+test('what is kept and sent of a photo is the redrawn picture only: smaller, a JPEG, without its hidden data or its name', async ({ page, context }) => {
+  await setUp(page);
+  const HIDDEN = 'GPS 32.0853,34.7818 SECRET-MARKER';
+  const picked = png(2000, 1000, HIDDEN);
+  expect(picked.toString('latin1')).toContain(HIDDEN);
+
+  await page.getByLabel('קובץ לצירוף').setInputFiles({ name: 'IMG_0042_home.png', mimeType: 'image/png', buffer: picked });
+  await expect(page.locator('.attachment-chip')).toHaveText('תמונה');
+  await page.getByLabel('הודעה').fill('מה יש בתמונה?');
+
+  // No network: the message is kept on the phone exactly as it would be sent, and no call leaves the test.
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'שליחה' }).tap();
+  await expect(page.getByText('אין אינטרנט כרגע. ננסה שוב?')).toBeVisible();
+  await expect(page.getByRole('img', { name: 'התמונה שצירפתי' })).toBeVisible();
+
+  const kept = await page.evaluate(
+    (marker) =>
+      new Promise<{ kind: string; name: string; size: number; head: number[]; text: string; width: number; height: number; marked: boolean; exif: boolean }>((resolve, reject) => {
+        const open = indexedDB.open('kid-llm');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const all = open.result.transaction('chats').objectStore('chats').getAll();
+          all.onerror = () => reject(all.error);
+          all.onsuccess = () => {
+            open.result.close();
+            const message = (all.result as { messages: { text: string; attachment: { kind: string; name: string; bytes: ArrayBuffer } }[] }[])[0].messages[0];
+            const bytes = new Uint8Array(message.attachment.bytes);
+            let latin = '';
+            for (const byte of bytes) latin += String.fromCharCode(byte);
+            createImageBitmap(new Blob([message.attachment.bytes], { type: 'image/jpeg' })).then(
+              (picture) =>
+                resolve({
+                  kind: message.attachment.kind,
+                  name: message.attachment.name,
+                  size: bytes.length,
+                  head: [...bytes.slice(0, 3)],
+                  text: message.text,
+                  width: picture.width,
+                  height: picture.height,
+                  marked: latin.includes(marker) || latin.includes('SECRET') || latin.includes('IMG_0042'),
+                  exif: latin.includes('Exif'),
+                }),
+              reject,
+            );
+          };
+        };
+      }),
+    HIDDEN,
+  );
+
+  expect(kept.kind).toBe('image');
+  expect(kept.text).toBe('מה יש בתמונה?');
+  // A JPEG the app drew itself, not the file she picked.
+  expect(kept.head).toEqual([0xff, 0xd8, 0xff]);
+  expect(kept.marked).toBe(false);
+  expect(kept.exif).toBe(false);
+  expect(kept.name).toBe('');
+  // Made smaller: the long side is 1568, the shape is kept.
+  expect(kept.width).toBe(1568);
+  expect(kept.height).toBe(784);
+  expect(kept.size).toBeLessThan(4 * 1024 * 1024);
+  await context.setOffline(false);
+});
+

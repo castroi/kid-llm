@@ -4,7 +4,7 @@ import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } fro
 import type { ChatRequest, ImageRequest } from '../ai/send';
 import { forgetParsed } from '../core/answerText';
 import { canAttachIn, type Attachment } from '../core/attachment';
-import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
+import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withNewestFileRefused, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
@@ -174,6 +174,9 @@ export function useChat(services: Services): ChatController {
         } else {
           if (text) write('failed');
           else drop();
+          // The provider would not take the request that carried her file (a model that reads no
+          // files, or a file it can't open): the file is not sent again, so the chat isn't stuck on it.
+          if (reason === 'bad-request' && withFile) put({ ...current, messages: withNewestFileRefused(current.messages) });
           if (shown.current.id === current.id) setNotice({ kind: 'error', reason });
         }
       } finally {
