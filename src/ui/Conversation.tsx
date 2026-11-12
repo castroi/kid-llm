@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { plainText } from '../core/answerText';
 import type { GeneratedImage } from '../ai/providers';
 import { siteName, type Source } from '../ai/sources';
@@ -41,17 +41,29 @@ function CopyButton({ text, copyText, label }: { text: string; copyText: (text: 
   );
 }
 
-/** A picture she asked for. Its address lives only while it is on the screen. */
+/**
+ * A picture kept as bytes on the phone. Its address lives only while it is on the screen:
+ * it is made when the picture is put on the screen (before it is painted) and released when
+ * the picture leaves it or its bytes change.
+ */
+function BlobImage({ bytes, type, className, alt }: { bytes: ArrayBuffer; type: string; className: string; alt: string }) {
+  const show = useCallback(
+    (img: HTMLImageElement | null) => {
+      if (!img) return;
+      const address = URL.createObjectURL(new Blob([bytes], { type }));
+      img.src = address;
+      return () => URL.revokeObjectURL(address);
+    },
+    [bytes, type],
+  );
+  return <img ref={show} className={className} alt={alt} />;
+}
+
+/** A picture she asked for. */
 function Picture({ image }: { image: GeneratedImage }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    const address = URL.createObjectURL(new Blob([image.bytes], { type: image.type }));
-    setUrl(address);
-    return () => URL.revokeObjectURL(address);
-  }, [image]);
   return (
     <>
-      {url && <img className="picture" src={url} alt="התמונה שציירתי" />}
+      <BlobImage bytes={image.bytes} type={image.type} className="picture" alt="התמונה שציירתי" />
       <p className="answer-meta">כדי לשמור: לחיצה ארוכה על התמונה</p>
     </>
   );
@@ -119,16 +131,7 @@ function Answer({ message, writing, last, onRetry, copyText }: { message: Stored
 
 /** What she attached to a message: a picture is shown; a document is shown by her name for it. */
 function Attached({ attachment }: { attachment: Attachment }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const picture = attachment.kind === 'image';
-  useEffect(() => {
-    if (!picture) return;
-    // Its address lives only while it is on the screen.
-    const address = URL.createObjectURL(new Blob([attachment.bytes], { type: 'image/jpeg' }));
-    setUrl(address);
-    return () => URL.revokeObjectURL(address);
-  }, [attachment, picture]);
-  if (picture) return url ? <img className="attached-picture" src={url} alt="התמונה שצירפתי" /> : null;
+  if (attachment.kind === 'image') return <BlobImage bytes={attachment.bytes} type="image/jpeg" className="attached-picture" alt="התמונה שצירפתי" />;
   return (
     <span className="attached-file">
       <FileIcon />
