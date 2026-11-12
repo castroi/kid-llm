@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
 import { AiError } from '../ai/providers';
 import { appVersion } from '../core/version';
 import { fakeParent, type FakePhone } from '../test/fakeParent';
@@ -356,6 +357,68 @@ describe('the settings', () => {
     expect(screen.getByText('מוצג רק בברכת הפתיחה. לא נשלח לספק.')).toBeInTheDocument();
     expect(screen.getByText(/נשלחות לספק עם כל הודעה, אחרי הנחיות הבטיחות המובנות/)).toBeInTheDocument();
     expect(screen.getByText(/המפתח נשמר רק באייפון הזה/)).toBeInTheDocument();
+  });
+});
+
+describe('who uses the app', () => {
+  const box = () => screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }) as HTMLInputElement;
+  const save = () => userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+
+  it("is a child on a phone where nothing else was saved, and saving keeps it that way", async () => {
+    const { phone } = await openSettings();
+    expect(box().checked).toBe(true);
+    expect(screen.getByText(/מסומן: עם כל הודעה נשלחות לספק הנחיות הבטיחות המובנות לילדים/)).toBeInTheDocument();
+    expect(screen.queryByText(/המודל עונה כמו למבוגר/)).not.toBeInTheDocument();
+    await save();
+    expect(phone.settings.parentUse).toBeUndefined();
+  });
+
+  it('warns as soon as it is unticked, and saves the parent\'s own use only on "save"', async () => {
+    const { phone } = await openSettings();
+    await userEvent.click(box());
+    expect(box().checked).toBe(false);
+    expect(screen.getByText(/הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר/)).toBeInTheDocument();
+    expect(screen.getByText(/חשוב לסמן אותה\s+ולשמור לפני שהאייפון חוזר לילדה/)).toBeInTheDocument();
+    // The parent is told what else goes, that these chats are not kept, and that it doesn't end by itself.
+    expect(screen.getByText(/ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה/)).toBeInTheDocument();
+    expect(screen.getByText(/שיחות במצב הזה לא נשמרות באייפון\s+ולא מופיעות ברשימת השיחות שלה/)).toBeInTheDocument();
+    expect(screen.getByText(/המצב הזה לא מסתיים מעצמו/)).toBeInTheDocument();
+    expect(screen.getByText(/מגבלת ההודעות היומית חלה גם כאן/)).toBeInTheDocument();
+    // Nothing changed on the phone yet.
+    expect(phone.settings.parentUse).toBeUndefined();
+    await save();
+    expect(screen.getByText('נשמר.')).toBeInTheDocument();
+    expect(phone.settings.parentUse).toBe(true);
+  });
+
+  it("shows a saved parent's own use, and goes back to a child when it is ticked again and saved", async () => {
+    const { phone } = await openSettings({
+      settings: { provider: 'venice', models: { chat: 'm', search: '', math: '', draw: '' }, systemPrompt: '', childName: '', dailyLimit: null, parentUse: true },
+    });
+    expect(box().checked).toBe(false);
+    expect(screen.getByText(/המודל עונה כמו למבוגר/)).toBeInTheDocument();
+    await userEvent.click(box());
+    expect(box().checked).toBe(true);
+    await save();
+    expect(phone.settings.parentUse).toBeUndefined();
+    expect(JSON.stringify(phone.settings)).not.toContain('parentUse');
+  });
+
+  it('shows the built-in instructions word for word, as they are sent', async () => {
+    await openSettings();
+    expect(screen.getByText('הנחיות הבטיחות המובנות, כפי שהן נשלחות')).toBeInTheDocument();
+    // Everything the app itself adds, for a child and in a parent's own use: nothing is sent that isn't shown here.
+    for (const lines of [BASELINE_PROMPT, SEARCH_BASELINE, FILE_BASELINE, IMAGE_BASELINE, SEARCH_BASELINE_PARENT, FILE_BASELINE_PARENT]) {
+      const shown = screen.getByText(lines);
+      expect(shown).toHaveAttribute('dir', 'ltr');
+      expect(shown.closest('details')).not.toBeNull();
+    }
+  });
+
+  it('is not on the screen before the code is entered', () => {
+    open({ pin: '2468' });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByText(BASELINE_PROMPT)).not.toBeInTheDocument();
   });
 });
 
