@@ -79,3 +79,58 @@ test('the mode picker opens from the chip, fits the screen, and changes the mode
   await expect(sheet).toBeHidden();
   await expect(page.getByRole('button', { name: 'חשבון', exact: true })).toBeVisible();
 });
+
+test('her own message has a copy button under it that is big enough to tap and stays on the screen', async ({ page }) => {
+  await setUp(page);
+  await expect(page.getByLabel('הודעה')).toBeVisible();
+  // A chat put straight into the app's own database: nothing is sent to a provider.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open('kid-llm');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const tx = open.result.transaction('chats', 'readwrite');
+          tx.objectStore('chats').put({
+            id: 'talk',
+            title: 'שמיים',
+            mode: 'chat',
+            createdAt: 1,
+            updatedAt: 2,
+            messages: [
+              { id: 'q', role: 'user', text: 'למה השמיים כחולים? '.repeat(12), at: 1, mode: 'chat' },
+              { id: 'a', role: 'assistant', text: 'בגלל האור של השמש.', at: 2, mode: 'chat' },
+            ],
+          });
+          tx.onerror = () => reject(tx.error);
+          tx.oncomplete = () => {
+            open.result.close();
+            resolve();
+          };
+        };
+      }),
+  );
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
+  await page.getByRole('dialog', { name: 'השיחות שלי' }).getByRole('button', { name: 'שמיים', exact: true }).tap();
+
+  const mine = page.getByRole('button', { name: 'העתקה של מה שכתבתי' });
+  await expect(mine).toBeVisible();
+  // Its name doesn't contain the message box's label ("הודעה"), so getByLabel('הודעה') still finds only the box.
+  await expect(page.getByLabel('הודעה')).toHaveCount(1);
+  // The answer keeps its own button, told apart by its name.
+  await expect(page.getByRole('button', { name: 'העתקה', exact: true })).toBeVisible();
+
+  const viewport = page.viewportSize()!;
+  const size = (await mine.boundingBox())!;
+  expect(size.height).toBeGreaterThanOrEqual(48);
+  expect(size.width).toBeGreaterThanOrEqual(48);
+  expect(size.x).toBeGreaterThanOrEqual(0);
+  expect(size.x + size.width).toBeLessThanOrEqual(viewport.width);
+  // It sits under her message, on her side of the screen (the right, in Hebrew).
+  const bubble = (await page.locator('.bubble').boundingBox())!;
+  expect(size.y).toBeGreaterThanOrEqual(bubble.y + bubble.height);
+  expect(Math.round(size.x + size.width)).toBe(Math.round(bubble.x + bubble.width));
+  // A long message still doesn't push the page sideways.
+  const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
+  expect(pageWidth).toBeLessThanOrEqual(viewport.width);
+});

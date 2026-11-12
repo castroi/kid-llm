@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
 import { AiError } from '../ai/providers';
 import type { ParentServices } from '../app/parentServices';
 import { isReady, MODES } from '../core/modes';
 import { parentMessage, waitText } from '../core/parentMessages';
+import type { AppVersion } from '../core/version';
 import { PIN_PATTERN, type PinResult } from '../storage/pin';
 import { MAX_DAILY_LIMIT, MAX_MODEL_CHARS, MAX_NAME_CHARS, MAX_SYSTEM_PROMPT_CHARS, type Settings } from '../storage/settings';
 
@@ -378,6 +380,53 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
         <section className="card">
           <h2 className="card-title">הנחיות והגבלות</h2>
           <div className="field">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.parentUse !== true}
+                // Unticked is saved as `parentUse`; ticked removes it, so a phone with nothing saved is a child's.
+                onChange={(event) => change({ parentUse: event.target.checked ? undefined : true })}
+              />
+              <span>האפליקציה בשימוש של ילדה</span>
+            </label>
+            {draft.parentUse === true ? (
+              <p className="hint warning">
+                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת כאן למטה, ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה. שיחות במצב הזה לא נשמרות באייפון
+                ולא מופיעות ברשימת השיחות שלה, ובמעבר בין המצבים נפתחת שיחה חדשה. ציור נשאר במצב בטוח לילדים, ומגבלת ההודעות היומית חלה גם כאן. המצב הזה לא מסתיים מעצמו: מסך הצ'אט מציג "מצב הורים" עד שהתיבה מסומנת שוב. חשוב לסמן אותה
+                ולשמור לפני שהאייפון חוזר לילדה.
+              </p>
+            ) : (
+              <p className="hint">מסומן: עם כל הודעה נשלחות לספק הנחיות הבטיחות המובנות לילדים, ואחריהן ההנחיות שכתבת. בלי סימון הן לא נשלחות, למשל כשהורה משתמש באפליקציה בעצמו.</p>
+            )}
+            <details className="builtin">
+              <summary>הנחיות הבטיחות המובנות, כפי שהן נשלחות</summary>
+              <p className="hint">עם כל הודעה:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {BASELINE_PROMPT}
+              </p>
+              <p className="hint">במצב "חיפוש", בנוסף:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {SEARCH_BASELINE}
+              </p>
+              <p className="hint">עם קובץ מצורף, בנוסף:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {FILE_BASELINE}
+              </p>
+              <p className="hint">עם כל בקשת ציור (תמיד, גם בלי סימון):</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {IMAGE_BASELINE}
+              </p>
+              <p className="hint">בלי סימון, במצב "חיפוש":</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {SEARCH_BASELINE_PARENT}
+              </p>
+              <p className="hint">בלי סימון, עם קובץ מצורף:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {FILE_BASELINE_PARENT}
+              </p>
+            </details>
+          </div>
+          <div className="field">
             <label htmlFor="system-prompt">הנחיות מערכת (System prompt)</label>
             <textarea
               id="system-prompt"
@@ -473,6 +522,34 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
           {dataStatus}
         </p>
       </section>
+
+      <VersionLine version={parent.version} />
     </>
+  );
+}
+
+const commitTime = new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short' });
+
+/**
+ * Which build is on this phone, so a parent can tell whether a fix has arrived. Shown only
+ * here, behind the code: she gets no link out of the app. The link opens outside the app,
+ * sends no referrer, and the page it opens gets no handle back to the app.
+ */
+function VersionLine({ version }: { version: AppVersion }) {
+  return (
+    <div className="version">
+      <p className="hint">
+        גרסה <bdi dir="ltr">{version.label}</bdi>
+        {version.date && (
+          <>
+            {' · '}
+            <bdi dir="ltr">{commitTime.format(version.date)}</bdi>
+          </>
+        )}
+      </p>
+      <a className="source-link" href={version.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+        <bdi dir="ltr">GitHub</bdi>
+      </a>
+    </div>
   );
 }

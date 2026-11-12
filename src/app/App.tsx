@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { canAttachIn } from '../core/attachment';
-import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
+import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
 import { missingFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
@@ -19,7 +19,7 @@ function readSetup(services: Services) {
   const apiKey = services.loadApiKey(settings.provider);
   const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
   // She can attach a file only once the parent chose a model for files.
-  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && Boolean(settings.fileModel) };
+  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && Boolean(settings.fileModel), parentUse: settings.parentUse === true };
 }
 
 export function App({ services, parent }: { services: Services; parent: ParentServices }) {
@@ -30,10 +30,35 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
   // Read when the app opens and again when the parent area closes; every send reads the
   // settings itself, so a change takes effect at once.
   const [setup, setSetup] = useState(() => readSetup(services));
+  // Whose hands the app is in, as the screen last knew it.
+  const parentUse = useRef(setup.parentUse);
+  const refreshSetup = useCallback(() => {
+    const next = readSetup(services);
+    // The app changed hands (her use, or a parent's own): the chat on the screen is not carried
+    // over. She doesn't get a parent's chat to read or continue, and a parent starts a new one.
+    if (next.parentUse !== parentUse.current) {
+      parentUse.current = next.parentUse;
+      startNewChat();
+    }
+    setSetup(next);
+  }, [services, startNewChat]);
   const closeParentArea = useCallback(() => {
-    setSetup(readSetup(services));
+    refreshSetup();
     setInParentArea(false);
-  }, [services]);
+  }, [refreshSetup]);
+  // The settings can also change outside this screen (another tab of the site): read them again
+  // when that happens and whenever the app comes back to the screen, so the notice never goes stale.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshSetup();
+    };
+    window.addEventListener('storage', refreshSetup);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      window.removeEventListener('storage', refreshSetup);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [refreshSetup]);
 
   const blocked = setup.notSetUp.includes(mode);
   const empty = chat.messages.length === 0;
@@ -60,6 +85,12 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
           <PlusIcon />
         </button>
       </header>
+      {/* For as long as the child instructions are off, the chat screen says so: a phone handed back to her like this is noticed. */}
+      {setup.parentUse && (
+        <p className="parent-use" role="note">
+          {PARENT_USE_MESSAGE}
+        </p>
+      )}
 
       <main className="scroll">
         {empty ? (

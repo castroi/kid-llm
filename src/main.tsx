@@ -5,6 +5,7 @@ import { App } from './app/App';
 import type { ParentServices } from './app/parentServices';
 import type { Services } from './app/useChat';
 import { prepareAttachment, type PickedFile } from './core/attachment';
+import { APP_VERSION } from './core/version';
 import { openChatStore, requestPersistence, type ChatStore } from './storage/chatStore';
 import { checkPin, hasPin, lockedFor, setPin } from './storage/pin';
 import { forgetSetup, hasSetup, loadApiKey, loadSettings, saveApiKey, saveSettings } from './storage/settings';
@@ -104,6 +105,7 @@ function browserParentServices(store: ChatStore | null): ParentServices {
     deleteAllChats: async () => {
       await store?.clear();
     },
+    version: APP_VERSION,
   };
 }
 
