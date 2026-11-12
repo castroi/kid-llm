@@ -164,7 +164,8 @@ describe('sanitizeChat', () => {
 });
 
 describe('files she attached', () => {
-  const pdf = () => ({ kind: 'pdf' as const, bytes: new TextEncoder().encode('%PDF-1.7').buffer, name: 'דף עבודה.pdf' });
+  // "%PDF-1.7", as bytes of this page's own kind (a TextEncoder's bytes are not, under jsdom).
+  const pdf = () => ({ kind: 'pdf' as const, bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x37]).buffer, name: 'דף עבודה.pdf' });
   const photo = () => ({ kind: 'image' as const, bytes: new Uint8Array([0xff, 0xd8, 0xff, 1]).buffer, name: '' });
   const chatWith = (attachment: unknown, role: StoredMessage['role'] = 'user', mode = 'chat') => ({
     id: 'c1',
