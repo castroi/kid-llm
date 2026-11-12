@@ -18,17 +18,20 @@ export const MAX_SOURCE_URL_CHARS = 2_000;
 export const MAX_SITE_CHARS = 60;
 export const MAX_SITE_LABELS = 5;
 
+/** One part of an ordinary site name: letters, digits and hyphens, not starting or ending with a hyphen. */
+const LABEL = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+
 /**
  * The site's name as it is shown and as two links are told apart: the host without "www.".
  * null when the host is not an ordinary site name: a number address (also the phone itself
- * or a device at home), a single word ("localhost"), an empty part ("a..b", a trailing
- * dot), or a name too long to be one.
+ * or a device at home), a single word ("localhost"), an empty or odd part ("a..b", a
+ * trailing dot, punctuation), or a name too long to be one.
  */
 function siteOf(url: URL): string | null {
   const labels = url.hostname.split('.');
-  if (labels.length < 2 || labels.length > MAX_SITE_LABELS || labels.some((label) => label === '')) return null;
-  // `URL` writes every number address (also "127.1" and "0x7f.1") as four numbers, so its last part is digits; no real site's is.
-  if (/^\d+$/.test(labels[labels.length - 1])) return null;
+  if (labels.length < 2 || labels.length > MAX_SITE_LABELS || !labels.every((label) => LABEL.test(label))) return null;
+  // A real site's last part starts with a letter. A number address never does, however it was written.
+  if (!/^[a-z]/.test(labels[labels.length - 1])) return null;
   const site = url.hostname.replace(/^www\./, '');
   if (!site.includes('.') || site.length > MAX_SITE_CHARS) return null;
   return site;
@@ -55,7 +58,8 @@ function safeUrl(value: unknown): URL | null {
  */
 export function siteName(url: string): string {
   const safe = safeUrl(url);
-  return safe ? (siteOf(safe) ?? '') : '';
+  // An address that passed `safeUrl` has a site name.
+  return (safe && siteOf(safe)) || '';
 }
 
 /**

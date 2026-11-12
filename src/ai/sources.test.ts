@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { MAX_SITE_CHARS, MAX_SOURCES, MAX_SOURCE_URL_CHARS, sanitizeSources, siteName } from './sources';
+import { MAX_SITE_CHARS, MAX_SITE_LABELS, MAX_SOURCES, MAX_SOURCE_URL_CHARS, sanitizeSources, siteName } from './sources';
 
 describe('sanitizeSources', () => {
   it('keeps only the address of a citation: no title, page text or date', () => {
@@ -30,7 +30,7 @@ describe('sanitizeSources', () => {
   });
 
   it('drops number addresses, also the phone itself and devices at home, however they are written', () => {
-    const numbers = ['https://192.168.1.1/', 'https://10.0.0.1/', 'https://1.2.3.4/', 'https://127.0.0.1/', 'https://127.1/', 'https://0x7f.1/', 'https://2130706433/', 'https://[::1]/', 'https://[2001:db8::1]/'];
+    const numbers = ['https://192.168.1.1/', 'https://10.0.0.1/', 'https://1.2.3.4/', 'https://127.0.0.1/', 'https://127.1/', 'https://0x7f.1/', 'https://2130706433/', 'https://[::1]/', 'https://[2001:db8::1]/', 'https://[::ffff:192.168.1.1]/', 'https://192.168.1.1./', 'https://%31%32%37.0.0.1/'];
     expect(sanitizeSources(numbers.map((url) => ({ url })))).toEqual([]);
   });
 
@@ -51,6 +51,22 @@ describe('sanitizeSources', () => {
     for (const url of odd) expect(sanitizeSources([{ url }]), url).toEqual([]);
     // The usual port written out is the usual port.
     expect(sanitizeSources([{ url: 'https://example.com:443/x' }])).toEqual([{ url: 'https://example.com/x' }]);
+  });
+
+  it('drops a site name with punctuation in it, or a part that starts or ends with a hyphen', () => {
+    for (const url of ['https://exa_mple.com/', 'https://-example.com/', 'https://example-.com/', 'https://exa{mple}.com/', 'https://example.123/']) expect(sanitizeSources([{ url }]), url).toEqual([]);
+  });
+
+  it('keeps ordinary sites, up to the longest name and the most parts allowed', () => {
+    for (const url of ['https://he.wikipedia.org/', 'https://he.m.wikipedia.org/', 'https://www.gov.il/', 'https://kids.britannica.com/', 'https://www.example.co.il/', 'https://xn--4dbrk0ce.co.il/']) {
+      expect(sanitizeSources([{ url }]), url).toEqual([{ url }]);
+    }
+    const parts = (count: number) => `https://${Array.from({ length: count - 2 }, (_, i) => `p${i}`).join('.')}.example.com/`;
+    expect(sanitizeSources([{ url: parts(MAX_SITE_LABELS) }])).toHaveLength(1);
+    expect(sanitizeSources([{ url: parts(MAX_SITE_LABELS + 1) }])).toEqual([]);
+    const long = (chars: number) => `https://${'a'.repeat(chars - '.example.com'.length)}.example.com/`;
+    expect(sanitizeSources([{ url: long(MAX_SITE_CHARS) }])).toHaveLength(1);
+    expect(sanitizeSources([{ url: long(MAX_SITE_CHARS + 1) }])).toEqual([]);
   });
 
   it('keeps the address as URL wrote it, never the text as it came', () => {
