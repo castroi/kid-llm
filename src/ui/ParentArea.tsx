@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { BASELINE_PROMPT, FILE_BASELINE, IMAGE_BASELINE, SEARCH_BASELINE } from '../ai/baseline';
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
 import { AiError } from '../ai/providers';
 import type { ParentServices } from '../app/parentServices';
@@ -377,6 +378,44 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
 
         <section className="card">
           <h2 className="card-title">הנחיות והגבלות</h2>
+          <div className="field">
+            <label className="check">
+              <input
+                type="checkbox"
+                checked={draft.parentUse !== true}
+                // Unticked is saved as `parentUse`; ticked removes it, so a phone with nothing saved is a child's.
+                onChange={(event) => change({ parentUse: event.target.checked ? undefined : true })}
+              />
+              <span>האפליקציה בשימוש של ילדה</span>
+            </label>
+            {draft.parentUse === true ? (
+              <p className="hint warning">
+                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת כאן למטה. ציור נשאר במצב בטוח לילדים. מסך הצ'אט מציג "מצב הורים" עד שהתיבה מסומנת שוב. חשוב לסמן אותה
+                ולשמור לפני שהאייפון חוזר לילדה.
+              </p>
+            ) : (
+              <p className="hint">מסומן: עם כל הודעה נשלחות לספק הנחיות הבטיחות המובנות לילדים, ואחריהן ההנחיות שכתבת. בלי סימון הן לא נשלחות, למשל כשהורה משתמש באפליקציה בעצמו.</p>
+            )}
+            <details className="builtin">
+              <summary>הנחיות הבטיחות המובנות, כפי שהן נשלחות</summary>
+              <p className="hint">עם כל הודעה:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {BASELINE_PROMPT}
+              </p>
+              <p className="hint">במצב "חיפוש", בנוסף:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {SEARCH_BASELINE}
+              </p>
+              <p className="hint">עם קובץ מצורף, בנוסף:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {FILE_BASELINE}
+              </p>
+              <p className="hint">עם כל בקשת ציור (תמיד, גם בלי סימון):</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {IMAGE_BASELINE}
+              </p>
+            </details>
+          </div>
           <div className="field">
             <label htmlFor="system-prompt">הנחיות מערכת (System prompt)</label>
             <textarea

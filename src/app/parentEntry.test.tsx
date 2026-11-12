@@ -1,9 +1,9 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { AiError, type ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
-import { SETUP_MESSAGE } from '../core/kidMessages';
+import { PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import type { ChatStore } from '../storage/chatStore';
 import { fakeParent } from '../test/fakeParent';
 import { memoryStore } from '../test/memoryStore';
@@ -96,6 +96,39 @@ describe('the way into the parent area', () => {
     await openParentArea();
     expect(screen.getByLabelText('קוד הורים')).toBeInTheDocument();
     expect(screen.queryByLabelText('מפתח API')).not.toBeInTheDocument();
+  });
+
+  it("shows the parent's-own-use notice on the chat screen once the parent unticked the box and saved, and drops it when ticked again", async () => {
+    const { phone, requests } = openApp();
+    phone.pin = '2468';
+    phone.apiKey = 'sk-parent';
+    phone.settings = { ...phone.settings, models: { ...phone.settings.models, chat: 'kid-model' } };
+    const enter = async () => {
+      await openParentArea();
+      await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
+      await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
+      return screen.findByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' });
+    };
+    const leave = async () => {
+      await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+      await userEvent.click(screen.getByRole('button', { name: 'סיום' }));
+    };
+
+    await userEvent.click(await enter());
+    await leave();
+    expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
+    await userEvent.type(screen.getByLabelText('הודעה'), 'hello');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    expect(await screen.findByText('היי!')).toBeInTheDocument();
+    expect(requests[0].kidUse).toBe(false);
+
+    await userEvent.click(await enter());
+    await leave();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('הודעה'), 'again');
+    await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]).not.toHaveProperty('kidUse');
   });
 
   it('starts a fresh chat on the screen after the parent deleted every chat', async () => {

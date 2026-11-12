@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { canAttachIn } from '../core/attachment';
-import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
+import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
 import { missingFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
@@ -19,7 +19,7 @@ function readSetup(services: Services) {
   const apiKey = services.loadApiKey(settings.provider);
   const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
   // She can attach a file only once the parent chose a model for files.
-  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && Boolean(settings.fileModel) };
+  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && Boolean(settings.fileModel), parentUse: settings.parentUse === true };
 }
 
 export function App({ services, parent }: { services: Services; parent: ParentServices }) {
@@ -60,6 +60,12 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
           <PlusIcon />
         </button>
       </header>
+      {/* For as long as the child instructions are off, the chat screen says so: a phone handed back to her like this is noticed. */}
+      {setup.parentUse && (
+        <p className="parent-use" role="note">
+          {PARENT_USE_MESSAGE}
+        </p>
+      )}
 
       <main className="scroll">
         {empty ? (

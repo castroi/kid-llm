@@ -155,6 +155,8 @@ export function useChat(services: Services): ChatController {
             messages: withFile ? talk : talk.map(({ role, content }) => ({ role, content })),
             apiKey,
             webSearch: forMode === 'search',
+            // The child baseline is left out only when a parent switched the app to their own use.
+            ...(settings.parentUse === true ? { kidUse: false } : {}),
             signal: controller.signal,
             onDelta: (piece) => {
               // Another answer to the same message counts toward the day only once it really arrives.

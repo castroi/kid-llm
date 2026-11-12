@@ -53,7 +53,7 @@ export interface ChatMessage {
 
 export interface ChatCall {
   model: string;
-  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first, never empty. */
+  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first. Empty only in a parent's own use with nothing written: then no system message is sent. */
   systemPrompt: string;
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
@@ -298,7 +298,7 @@ const venice: ProviderAdapter = {
       headers: headers(apiKey, true),
       body: JSON.stringify({
         model,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages.map(veniceMessage)],
+        messages: [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages.map(veniceMessage)],
         stream: true,
         // Venice adds its own system prompt unless told not to; only the parent's goes with her chat.
         // Search mode always searches ("on"), so she gets what she picked; other modes never do.
