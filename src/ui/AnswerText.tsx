@@ -20,7 +20,8 @@ function Part({ part }: { part: Inline }) {
 
 /**
  * An answer on the screen. The model's text is shown as text only (React escapes it);
- * nothing in it can become HTML or a link she could tap.
+ * nothing in it can become HTML or a link she could tap. (The links under a search answer
+ * are not the model's text: they come from the provider's list of sources, src/ai/sources.ts.)
  */
 export function AnswerText({ text }: { text: string }) {
   return (

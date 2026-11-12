@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { plainText } from '../core/answerText';
 import type { GeneratedImage } from '../ai/providers';
+import { siteName, type Source } from '../ai/sources';
 import type { StoredMessage } from '../core/chat';
 import { modeName } from '../core/modes';
 import { AnswerText } from './AnswerText';
@@ -49,6 +50,28 @@ function Picture({ image }: { image: GeneratedImage }) {
   );
 }
 
+/**
+ * Where a search answer came from: links to the sites, each shown by the site's name only
+ * (never the page's title, which nobody checked). A link opens outside the app, sends no
+ * referrer, and the page it opens gets no handle back to the app.
+ */
+function Sources({ sources }: { sources: readonly Source[] }) {
+  return (
+    <div className="sources">
+      <p className="answer-meta">מאיפה התשובה:</p>
+      <ul className="source-list">
+        {sources.map((source) => (
+          <li key={source.url}>
+            <a className="source-link" href={source.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+              <bdi dir="ltr">{siteName(source.url)}</bdi>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Answer({ message, writing, last, onRetry, copyText }: { message: StoredMessage; writing: boolean; last: boolean; onRetry: () => void; copyText: (text: string) => Promise<void> }) {
   const beingWritten = writing && last;
   return (
@@ -62,6 +85,7 @@ function Answer({ message, writing, last, onRetry, copyText }: { message: Stored
       ) : (
         <p className="muted">חושבת...</p>
       )}
+      {!beingWritten && message.sources && message.sources.length > 0 && <Sources sources={message.sources} />}
       {beingWritten ? (
         <p className="answer-meta">
           {modeName(message.mode)} · {message.mode === 'draw' ? 'זה לוקח כמה שניות' : 'כותבת עכשיו'}
