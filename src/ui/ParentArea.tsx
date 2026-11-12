@@ -4,6 +4,7 @@ import { AiError } from '../ai/providers';
 import type { ParentServices } from '../app/parentServices';
 import { isReady, MODES } from '../core/modes';
 import { parentMessage, waitText } from '../core/parentMessages';
+import type { AppVersion } from '../core/version';
 import { PIN_PATTERN, type PinResult } from '../storage/pin';
 import { MAX_DAILY_LIMIT, MAX_MODEL_CHARS, MAX_NAME_CHARS, MAX_SYSTEM_PROMPT_CHARS, type Settings } from '../storage/settings';
 
@@ -473,6 +474,34 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
           {dataStatus}
         </p>
       </section>
+
+      <VersionLine version={parent.version} />
     </>
+  );
+}
+
+const commitTime = new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short' });
+
+/**
+ * Which build is on this phone, so a parent can tell whether a fix has arrived. Shown only
+ * here, behind the code: she gets no link out of the app. The link opens outside the app,
+ * sends no referrer, and the page it opens gets no handle back to the app.
+ */
+function VersionLine({ version }: { version: AppVersion }) {
+  return (
+    <div className="version">
+      <p className="hint">
+        גרסה <bdi dir="ltr">{version.label}</bdi>
+        {version.date && (
+          <>
+            {' · '}
+            <bdi dir="ltr">{commitTime.format(version.date)}</bdi>
+          </>
+        )}
+      </p>
+      <a className="source-link" href={version.url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+        <bdi dir="ltr">GitHub</bdi>
+      </a>
+    </div>
   );
 }

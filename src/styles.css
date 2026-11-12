@@ -215,10 +215,18 @@ button:disabled {
   padding: 12px 16px 0;
 }
 
-/* Her message: at the start of the line (the right, in Hebrew). */
-.bubble {
+/* Her message with its copy button under it: at the start of the line (the right, in Hebrew). */
+.mine {
   align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   max-width: 85%;
+}
+
+.bubble {
+  max-width: 100%;
   padding: 12px 16px;
   border-radius: 22px;
   background: var(--accent-tint);
@@ -663,6 +671,15 @@ textarea.input {
   font-size: 15px;
   line-height: 1.5;
   color: var(--muted);
+}
+
+/* Which build is on the phone, at the bottom of the parent's settings. */
+.version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
 }
 
 .button {
