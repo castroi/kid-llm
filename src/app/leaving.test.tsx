@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor, within } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } from '../ai/providers';
@@ -8,7 +8,7 @@ import type { Settings } from '../storage/settings';
 import { fakeParent } from '../test/fakeParent';
 import { memoryStore } from '../test/memoryStore';
 import { App } from './App';
-import { MAX_RESUMES, type Services } from './useChat';
+import { MAX_RESUMES, type Services, useChat } from './useChat';
 
 /*
  * What happens to an answer when the app leaves the screen (home screen, another app, a
@@ -42,13 +42,14 @@ interface Picture {
 
 const PICTURE: GeneratedImage = { type: 'image/webp', bytes: new Uint8Array([82, 73, 70, 70]).buffer };
 
-function openApp(options: { store?: ChatStore | null } = {}) {
+/** The phone and the provider, held by the test. `settings` is what the phone holds from the start. */
+function fakeServices(options: { store?: ChatStore | null; settings?: Settings } = {}) {
   const calls: Call[] = [];
   const pictures: Picture[] = [];
   let sent = 0;
   let id = 0;
   // What a parent may change while she is away.
-  const phone = { settings: SETTINGS, apiKey: 'sk-test' };
+  const phone = { settings: options.settings ?? SETTINGS, apiKey: 'sk-test' };
   const services: Services = {
     store: options.store ?? null,
     loadSettings: () => phone.settings,
@@ -74,8 +75,13 @@ function openApp(options: { store?: ChatStore | null } = {}) {
     newId: () => `id-${++id}`,
     copyText: async () => undefined,
   };
-  render(<App services={services} parent={fakeParent().parent} />);
-  return { calls, pictures, phone, sentNow: () => sent };
+  return { services, calls, pictures, phone, sentNow: () => sent };
+}
+
+function openApp(options: { store?: ChatStore | null; settings?: Settings } = {}) {
+  const fake = fakeServices(options);
+  render(<App services={fake.services} parent={fakeParent().parent} />);
+  return fake;
 }
 
 async function say(text: string) {
@@ -521,8 +527,9 @@ describe('saving when the app leaves the screen', () => {
 
   it("saves nothing in a parent's own use, and asks again still without the child instructions", async () => {
     const store = memoryStore();
-    const { calls, phone } = openApp({ store });
-    phone.settings = { ...SETTINGS, parentUse: true };
+    // The app opens in a parent's own use, so nothing changes hands during the test.
+    const { calls } = openApp({ store, settings: { ...SETTINGS, parentUse: true } });
+    expect(screen.getByRole('note')).toBeInTheDocument();
     await say('hello');
     await writes(calls[0], 'half an answer');
     leaveApp();
@@ -535,6 +542,29 @@ describe('saving when the app leaves the screen', () => {
     await finishes(calls[1]);
     await settle();
     expect(store.chats.size).toBe(0);
+  });
+
+  it("does not save a parent's half answer into one of her saved chats the parent opened", async () => {
+    const store = memoryStore();
+    const { calls, phone } = openApp({ store });
+    await say('שאלה שלה');
+    await writes(calls[0], 'תשובה');
+    await finishes(calls[0]);
+    await waitFor(() => expect(lastSaved(store)).toMatchObject({ role: 'assistant', text: 'תשובה' }));
+    const hers = JSON.stringify([...store.chats.values()]);
+
+    // The parent takes the app (as from another tab), opens her chat and asks in it.
+    phone.settings = { ...SETTINGS, parentUse: true };
+    act(() => void window.dispatchEvent(new Event('storage')));
+    await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'שאלה שלה' }));
+    await screen.findByText('תשובה');
+    await say('grown-up question');
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await writes(calls[1], 'half an answer');
+    leaveApp();
+    await settle();
+    expect(JSON.stringify([...store.chats.values()])).toBe(hers);
   });
 
   it('does not bring back a chat the parent deleted meanwhile', async () => {
@@ -558,5 +588,41 @@ describe('saving when the app leaves the screen', () => {
     await writes(calls[0], ' ועוד');
     await finishes(calls[0]);
     expect(screen.getByText('חצי ועוד')).toBeInTheDocument();
+  });
+});
+
+describe('the app changing hands while she is away', () => {
+  // The hook on its own, without the screen around it: in a real browser the re-ask runs
+  // before the screen notices the change of hands, so only the hook's own check can stop it.
+  async function cutWhileAway(startAs: Settings, thenAs: Settings) {
+    const fake = fakeServices({ settings: startAs });
+    const { result } = renderHook(() => useChat(fake.services));
+    act(() => void result.current.send('שלום'));
+    await waitFor(() => expect(fake.calls).toHaveLength(1));
+    await writes(fake.calls[0], 'חצי');
+    leaveApp();
+    fake.phone.settings = thenAs;
+    await breaks(fake.calls[0]);
+    comeBack();
+    await settle();
+    return fake;
+  }
+
+  it("does not ask her question again once a parent's own use was switched on", async () => {
+    const fake = await cutWhileAway(SETTINGS, { ...SETTINGS, parentUse: true });
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].request).not.toHaveProperty('kidUse');
+  });
+
+  it("does not ask a parent's question again once the app went back to her", async () => {
+    const fake = await cutWhileAway({ ...SETTINGS, parentUse: true }, SETTINGS);
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].request.kidUse).toBe(false);
+  });
+
+  it('still asks again when the app stayed in the same hands', async () => {
+    const fake = await cutWhileAway({ ...SETTINGS, parentUse: true }, { ...SETTINGS, parentUse: true, systemPrompt: 'Be brief.' });
+    await waitFor(() => expect(fake.calls).toHaveLength(2));
+    expect(fake.calls[1].request).toMatchObject({ kidUse: false, systemPrompt: 'Be brief.' });
   });
 });

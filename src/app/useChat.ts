@@ -274,6 +274,8 @@ export function useChat(services: Services): ChatController {
    */
   const answer = useCallback(
     async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[] = [], countOnFirstPiece = false) => {
+      // Whose hands the app was in when this was asked: a re-ask never goes out in other hands.
+      const parentUse = settings.parentUse === true;
       for (let resumes = 0; ; resumes++) {
         const cut = await attempt(base, forMode, settings, apiKey, replaced, countOnFirstPiece, resumes < MAX_RESUMES);
         if (!cut) return;
@@ -284,6 +286,10 @@ export function useChat(services: Services): ChatController {
         // changed the provider, the model or the instructions, or taken the key away, meanwhile.
         settings = services.loadSettings();
         apiKey = services.loadApiKey(settings.provider);
+        // The app changed hands while she was away (a parent's own use switched on or off). The
+        // chat on the screen is about to be replaced by a new one (App.tsx), and its question must
+        // not be asked again with the other instructions, or saved into the other person's chat.
+        if ((settings.parentUse === true) !== parentUse) return;
         if (!isReady(forMode) || missingFor(forMode, settings, apiKey)) {
           // Nothing to ask with any more: she gets the usual notice, and what was cut stays.
           setNotice({ kind: 'error', reason: cut.reason });
