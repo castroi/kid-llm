@@ -26,10 +26,6 @@ export function memoryStore(initial: Chat[] = []): ChatStore & { chats: Map<stri
       if (chat) chats.set(id, { ...chat, title });
       return Promise.resolve(chat !== undefined);
     },
-    remove: (id) => {
-      chats.delete(id);
-      return Promise.resolve();
-    },
     clear: () => {
       chats.clear();
       return Promise.resolve();

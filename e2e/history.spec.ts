@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-/* The list of chats at iPhone sizes. Opening, renaming and deleting chats are covered by the unit tests. */
+/* The list of chats at iPhone sizes. Opening and renaming chats are covered by the unit tests; she can't delete one. */
 
 test('the list of chats slides in from the right, fits the phone, and closes with a tap outside', async ({ page }) => {
   await page.goto('/');

@@ -53,7 +53,6 @@ function fakeStore(): ChatStore & { saved: Chat[]; updated: Chat[] } {
       return true;
     },
     rename: async () => true,
-    remove: async () => undefined,
     clear: async () => undefined,
     close: () => undefined,
   };
