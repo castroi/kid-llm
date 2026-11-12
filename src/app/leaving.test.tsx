@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { AiError, type AiErrorReason, type ChatResult } from '../ai/providers';
@@ -18,7 +18,7 @@ import { MAX_RESUMES, type Services } from './useChat';
 
 const SETTINGS: Settings = {
   provider: 'venice',
-  models: { chat: 'model-chat', search: '', math: '', draw: '' },
+  models: { chat: 'model-chat', search: 'model-search', math: '', draw: '' },
   systemPrompt: '',
   childName: '',
   dailyLimit: null,
@@ -37,10 +37,12 @@ function openApp(options: { store?: ChatStore | null } = {}) {
   const calls: Call[] = [];
   let sent = 0;
   let id = 0;
+  // What a parent may change while she is away.
+  const phone = { settings: SETTINGS, apiKey: 'sk-test' };
   const services: Services = {
     store: options.store ?? null,
-    loadSettings: () => SETTINGS,
-    loadApiKey: () => 'sk-test',
+    loadSettings: () => phone.settings,
+    loadApiKey: () => phone.apiKey,
     sendChat: (request) =>
       new Promise<ChatResult>((resolve, reject) => {
         // Like the real call, her stop ends it.
@@ -59,7 +61,7 @@ function openApp(options: { store?: ChatStore | null } = {}) {
     copyText: async () => undefined,
   };
   render(<App services={services} parent={fakeParent().parent} />);
-  return { calls, sentNow: () => sent };
+  return { calls, phone, sentNow: () => sent };
 }
 
 async function say(text: string) {
@@ -185,6 +187,100 @@ describe('an answer cut because the app left the screen', () => {
     // Her own "try again" still works, and starts a fresh count.
     await userEvent.click(screen.getByRole('button', { name: 'ננסה שוב' }));
     await waitFor(() => expect(calls).toHaveLength(MAX_RESUMES + 2));
+  });
+});
+
+describe('asking again goes with the setup as it is now', () => {
+  it('uses the provider, model, instructions and key the parent set while she was away', async () => {
+    const { calls, phone } = openApp();
+    await say('שלום');
+    expect(calls[0].request).toMatchObject({ model: 'model-chat', apiKey: 'sk-test', systemPrompt: '' });
+    leaveApp();
+    phone.settings = { ...SETTINGS, models: { ...SETTINGS.models, chat: 'model-new' }, systemPrompt: 'Be brief.' };
+    phone.apiKey = 'sk-new';
+    await breaks(calls[0]);
+    comeBack();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1].request).toMatchObject({ model: 'model-new', apiKey: 'sk-new', systemPrompt: 'Be brief.' });
+  });
+
+  it('does not ask again once the parent took the key away, and shows the usual notice instead', async () => {
+    const { calls, phone } = openApp();
+    await say('שלום');
+    await writes(calls[0], 'חצי תשובה');
+    leaveApp();
+    phone.apiKey = '';
+    await breaks(calls[0]);
+    comeBack();
+    expect(await screen.findByText(NO_INTERNET)).toBeInTheDocument();
+    await settle();
+    expect(calls).toHaveLength(1);
+    // What was cut stays, marked as cut.
+    expect(screen.getByText('חצי תשובה')).toBeInTheDocument();
+    expect(screen.getByText(/התשובה נקטעה/)).toBeInTheDocument();
+  });
+
+  it('does not ask again once the mode has no model any more', async () => {
+    const { calls, phone } = openApp();
+    await say('שלום');
+    leaveApp();
+    phone.settings = { ...SETTINGS, models: { ...SETTINGS.models, chat: '' } };
+    await breaks(calls[0], 'timeout');
+    comeBack();
+    await settle();
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe('asking again in search mode', () => {
+  it('asks again as a search, with only what she wrote in search mode', async () => {
+    const { calls } = openApp();
+    await say('שלום');
+    await writes(calls[0], 'היי');
+    await finishes(calls[0]);
+    // The mode is changed from the chip next to the message box once a chat has messages.
+    await userEvent.click(document.querySelector('.mode-chip') as HTMLElement);
+    await userEvent.click(within(screen.getByRole('dialog', { name: 'במה להשתמש עכשיו?' })).getByRole('button', { name: /חיפוש/ }));
+    await say('מי המציא את הטלפון?');
+    await waitFor(() => expect(calls).toHaveLength(2));
+    leaveApp();
+    comeBack();
+    await breaks(calls[1]);
+    await waitFor(() => expect(calls).toHaveLength(3));
+    expect(calls[2].request).toMatchObject({ model: 'model-search', webSearch: true });
+    expect(calls[2].request.messages).toEqual([{ role: 'user', content: 'מי המציא את הטלפון?' }]);
+    expect(calls[2].request.messages).toEqual(calls[1].request.messages);
+  });
+});
+
+describe('when she does something herself before the app is back', () => {
+  it('lets her own new message win: exactly one new call goes out', async () => {
+    const { calls } = openApp();
+    await say('ראשונה');
+    leaveApp();
+    await breaks(calls[0]);
+    // Still off the screen as far as the app knows, she sends another message.
+    await say('שנייה');
+    await waitFor(() => expect(calls).toHaveLength(2));
+    comeBack();
+    await settle();
+    expect(calls).toHaveLength(2);
+    expect(calls[1].request.messages.at(-1)).toEqual({ role: 'user', content: 'שנייה' });
+  });
+
+  it('lets her own "try again" win as well', async () => {
+    const { calls } = openApp();
+    await say('שלום');
+    await writes(calls[0], 'חצי');
+    leaveApp();
+    await breaks(calls[0]);
+    // No error is shown for a cut; the button under the cut half is the one she has.
+    expect(screen.queryByText(NO_INTERNET)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    comeBack();
+    await settle();
+    expect(calls).toHaveLength(2);
   });
 });
 

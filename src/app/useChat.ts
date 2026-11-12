@@ -41,6 +41,8 @@ export const MAX_RESUMES = 3;
 interface Cut {
   chat: Chat;
   countOnFirstPiece: boolean;
+  /** Why the call ended, for the notice she gets if the app does not ask again after all. */
+  reason: AiErrorReason;
 }
 
 export type Notice = { kind: 'error'; reason: AiErrorReason } | { kind: 'limit' } | null;
@@ -240,7 +242,7 @@ export function useChat(services: Services): ChatController {
           // switching apps; the app asks again by itself. Never after her stop (that is `cancelled`).
           const cutByLeaving = mayResume && (reason === 'network' || reason === 'timeout') && flips.current !== flipsSeen && shown.current.id === current.id;
           // A call that was to be counted when its answer arrived, and got nothing, is still to be counted.
-          if (cutByLeaving) cut = { chat: current, countOnFirstPiece: countOnFirstPiece && text === '' };
+          if (cutByLeaving) cut = { chat: current, countOnFirstPiece: countOnFirstPiece && text === '', reason };
           else if (shown.current.id === current.id) setNotice({ kind: 'error', reason });
         }
       } finally {
@@ -270,12 +272,21 @@ export function useChat(services: Services): ChatController {
         await backOnScreen();
         // Only if nothing else happened meanwhile: the same chat is on the screen, as the call left it.
         if (busy.current || shown.current.id !== cut.chat.id || shown.current.messages !== cut.chat.messages) return;
+        // A new call, so it goes with the settings and the key as they are now: a parent may have
+        // changed the provider, the model or the instructions, or taken the key away, meanwhile.
+        settings = services.loadSettings();
+        apiKey = services.loadApiKey(settings.provider);
+        if (!isReady(forMode) || missingFor(forMode, settings, apiKey)) {
+          // Nothing to ask with any more: she gets the usual notice, and what was cut stays.
+          setNotice({ kind: 'error', reason: cut.reason });
+          return;
+        }
         // What was cut is replaced by the new answer, and comes back if the new call brings nothing.
         replaced = cut.chat.messages.slice(base.messages.length);
         countOnFirstPiece = cut.countOnFirstPiece;
       }
     },
-    [attempt, backOnScreen],
+    [services, attempt, backOnScreen],
   );
 
   /** True (with the kind notice) when she has used up the day. */
