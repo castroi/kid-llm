@@ -23,8 +23,10 @@ function fromGit(format: string): string {
  * commit it deploys; anywhere else git does. The app checks both values before it shows
  * them (src/core/version.ts), so an odd value ends up as "dev", never as a link.
  */
-const commit = process.env.VERCEL_GIT_COMMIT_SHA || fromGit('%H');
-const commitDate = fromGit('%cI');
+const head = fromGit('%H');
+const commit = process.env.VERCEL_GIT_COMMIT_SHA || head;
+// The date is git's, so it is taken only when git is looking at that same commit.
+const commitDate = commit !== '' && commit === head ? fromGit('%cI') : '';
 
 export default defineConfig({
   plugins: [react()],

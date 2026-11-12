@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
 
 /*
@@ -150,6 +151,16 @@ test('the parent area ends with the version of the app and a link to its commit;
   expect(await link.getAttribute('href')).toMatch(/^https:\/\/github\.com\/castroi\/kid-llm(\/commit\/[0-9a-f]{40})?$/);
   expect(await link.getAttribute('rel')).toBe('noopener noreferrer');
   await expect(page.locator('.version')).toContainText(/גרסה\s*(dev|[0-9a-f]{7})/);
+  // CI always builds from a git checkout, so there the build must know its commit and its date:
+  // a build that silently lost them ("dev") fails here instead of reaching the phone.
+  if (process.env.CI) {
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    expect(await link.getAttribute('href')).toBe(`https://github.com/castroi/kid-llm/commit/${head}`);
+    const parts = page.locator('.version p bdi');
+    await expect(parts).toHaveCount(2);
+    await expect(parts.nth(0)).toHaveText(head.slice(0, 7));
+    await expect(parts.nth(1)).toHaveText(/\d/);
+  }
 
   const viewport = page.viewportSize()!;
   const size = (await link.boundingBox())!;
