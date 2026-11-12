@@ -1,4 +1,5 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
+import { dataUrl, SENT_FILE_NAMES, type ChatFile } from './files';
 import { sanitizeSources, type Source } from './sources';
 import { LineTooLongError, sseData } from './sse';
 
@@ -9,6 +10,7 @@ import { LineTooLongError, sseData } from './sse';
  * Adapted from kid-closet's src/ai/providers.ts.
  * Docs: Venice https://docs.venice.ai/api-reference/endpoint/chat/completions
  *       and https://docs.venice.ai/api-reference/endpoint/image/generate
+ *       Files in a chat: https://docs.venice.ai/guides/features/vision and .../guides/features/file-inputs
  */
 
 /** Why a call failed. The kid sees one friendly line; the parent area shows the reason. */
@@ -45,6 +47,8 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** A picture or a document she attached to this message (src/ai/files.ts). Only on a message of hers. */
+  file?: ChatFile;
 }
 
 export interface ChatCall {
@@ -272,6 +276,20 @@ async function readChatStream(response: Response, { apiKey, signal, webSearch, o
   return sources.length > 0 ? { text, finishReason, sources } : { text, finishReason };
 }
 
+/**
+ * One turn as Venice takes it. A message with a file is sent in parts: her text first, then
+ * the file inside the request itself as a `data:` address. A picture goes to a vision model
+ * as it is; Venice turns a document into text before the model sees it.
+ */
+function veniceMessage({ role, content, file }: ChatMessage): unknown {
+  if (!file || role !== 'user') return { role, content };
+  const part =
+    file.kind === 'image'
+      ? { type: 'image_url', image_url: { url: dataUrl(file) } }
+      : { type: 'file', file: { file_data: dataUrl(file), filename: SENT_FILE_NAMES[file.kind] } };
+  return { role, content: [{ type: 'text', text: content }, part] };
+}
+
 const venice: ProviderAdapter = {
   async streamChat(chat) {
     const { model, systemPrompt, messages, apiKey, signal, fetch, webSearch } = chat;
@@ -280,7 +298,7 @@ const venice: ProviderAdapter = {
       headers: headers(apiKey, true),
       body: JSON.stringify({
         model,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: [{ role: 'system', content: systemPrompt }, ...messages.map(veniceMessage)],
         stream: true,
         // Venice adds its own system prompt unless told not to; only the parent's goes with her chat.
         // Search mode always searches ("on"), so she gets what she picked; other modes never do.

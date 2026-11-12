@@ -46,6 +46,7 @@ function openApp(options: { draw?: Draw; store?: ChatStore | null; dailyLimit?: 
       request.onDelta('תשובה');
       return { text: 'תשובה', finishReason: 'stop' };
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: (request) => {
       pictures.push(request);
       return (options.draw ?? (async () => PICTURE))(request);

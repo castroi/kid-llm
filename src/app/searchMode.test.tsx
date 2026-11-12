@@ -20,6 +20,7 @@ function openApp(models: { chat: string; search: string; math: string; draw: str
       request.onDelta('תשובה');
       return { text: 'תשובה', finishReason: 'stop', ...(sources ? { sources } : {}) };
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => 0,
     countMessage: () => true,
