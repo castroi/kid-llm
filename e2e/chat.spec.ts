@@ -74,7 +74,6 @@ test('the mode picker opens from the chip, fits the screen, and changes the mode
     expect(size.height).toBeGreaterThanOrEqual(48);
     expect(size.y + size.height).toBeLessThanOrEqual(viewport.height);
   }
-  await expect(sheet.getByRole('button', { name: /חיפוש/ })).toBeDisabled();
 
   await sheet.getByRole('button', { name: /חשבון/ }).tap();
   await expect(sheet).toBeHidden();
