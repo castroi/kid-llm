@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { AiError, type ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
 import { MAX_MESSAGE_CHARS, type Chat } from '../core/chat';
-import { LIMIT_MESSAGE, NOT_SAVED_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
+import { LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import type { ChatStore } from '../storage/chatStore';
 import type { Settings } from '../storage/settings';
 import { fakeParent } from '../test/fakeParent';
@@ -53,7 +53,6 @@ function fakeStore(): ChatStore & { saved: Chat[]; updated: Chat[] } {
       return true;
     },
     rename: async () => true,
-    remove: async () => undefined,
     clear: async () => undefined,
     close: () => undefined,
   };
@@ -84,6 +83,7 @@ function open(options: Options = {}) {
       requests.push(request);
       return send(request);
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: () => Promise.reject(new Error('no drawing in this test')),
     sentToday: () => sent,
     countMessage: () => {
@@ -442,6 +442,50 @@ describe('the daily limit', () => {
   });
 });
 
+describe("a parent's own use", () => {
+  it('is off unless the parent switched it on: no notice, and the call asks for nothing but a child\'s chat', async () => {
+    const { requests } = open();
+    expect(screen.queryByText(PARENT_USE_MESSAGE)).not.toBeInTheDocument();
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    expect(requests[0]).not.toHaveProperty('kidUse');
+    expect(requests[0].systemPrompt).toBe('Be kind.');
+  });
+
+  it('says so on the chat screen for as long as it is on, and sends the call without the child baseline', async () => {
+    const { requests } = open({ settings: { parentUse: true } });
+    expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    expect(requests[0].kidUse).toBe(false);
+    expect(requests[0].systemPrompt).toBe('Be kind.');
+    // Still there with a conversation on the screen.
+    expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
+  });
+
+  it("writes nothing of a parent's own chat to the phone, and says that the chat isn't saved", async () => {
+    const store = fakeStore();
+    const { requests } = open({ store, settings: { parentUse: true } });
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    await screen.findByText('היי לך!');
+    expect(store.saved).toEqual([]);
+    expect(store.updated).toEqual([]);
+    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('asks again without the child baseline on "try again" too', async () => {
+    const { requests } = open({ settings: { parentUse: true } });
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1].kidUse).toBe(false);
+  });
+});
+
 describe('copying', () => {
   it('copies the answer as clean text and says so', async () => {
     const { copyText } = open({ send: answers('**מודגש** ו`קוד`') });
@@ -458,6 +502,53 @@ describe('copying', () => {
     await say('שלום');
     await screen.findByText('היי לך!');
     await userEvent.click(screen.getByRole('button', { name: 'העתקה' }));
+    expect(screen.queryByText('הועתק!')).not.toBeInTheDocument();
+  });
+});
+
+describe('copying her own message', () => {
+  const mine = () => screen.getByRole('button', { name: 'העתקה של מה שכתבתי' });
+
+  it('copies what she wrote exactly as she wrote it, signs and all, and says so', async () => {
+    const { copyText } = open();
+    await say('כמה זה 2*3*4 ו-**5**?');
+    await screen.findByText('היי לך!');
+    await userEvent.click(mine());
+    expect(copyText).toHaveBeenCalledTimes(1);
+    expect(copyText).toHaveBeenCalledWith('כמה זה 2*3*4 ו-**5**?');
+    expect(await screen.findByText('הועתק!')).toBeInTheDocument();
+    // A screen reader hears "copied" too: the button's own name gives way to what it shows.
+    expect(screen.getByRole('button', { name: 'הועתק!' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'העתקה של מה שכתבתי' })).not.toBeInTheDocument();
+    // The answer's own button is still there, and still says what it does.
+    expect(screen.getByRole('button', { name: 'העתקה' })).toBeInTheDocument();
+  });
+
+  it('is there while the answer is still being written', async () => {
+    const { copyText } = open({ send: () => new Promise(() => undefined) });
+    await say('שלום');
+    await userEvent.click(mine());
+    expect(copyText).toHaveBeenCalledWith('שלום');
+  });
+
+  it('gives every message of hers its own button', async () => {
+    const { copyText } = open();
+    await say('ראשונה');
+    await screen.findByText('היי לך!');
+    await say('שנייה');
+    await waitFor(() => expect(screen.getAllByText('היי לך!')).toHaveLength(2));
+    const buttons = screen.getAllByRole('button', { name: 'העתקה של מה שכתבתי' });
+    expect(buttons).toHaveLength(2);
+    await userEvent.click(buttons[0]);
+    expect(copyText).toHaveBeenCalledWith('ראשונה');
+  });
+
+  it('changes nothing when the browser refuses to copy', async () => {
+    const { copyText } = open();
+    copyText.mockRejectedValue(new Error('denied'));
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    await userEvent.click(mine());
     expect(screen.queryByText('הועתק!')).not.toBeInTheDocument();
   });
 });

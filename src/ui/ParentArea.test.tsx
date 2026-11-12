@@ -1,7 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
 import { AiError } from '../ai/providers';
+import { appVersion } from '../core/version';
 import { fakeParent, type FakePhone } from '../test/fakeParent';
 import { IDLE_CLOSE_MS, ParentArea } from './ParentArea';
 
@@ -304,11 +306,24 @@ describe('the settings', () => {
     });
   });
 
+  it('lets the parent name a model for files, and says what leaves the phone when she attaches one', async () => {
+    const { phone } = await openSettings();
+    expect(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת')).toHaveValue('');
+    expect(screen.getByText(/ריק = היא לא יכולה לצרף קבצים/)).toBeInTheDocument();
+    expect(screen.getByText(/מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת/)).toBeInTheDocument();
+    expect(screen.getByText(/מסמך נשלח כמו שהוא, עם כל מה שכתוב בו וגם מה שלא רואים בו: שם מי שכתב אותו, הערות, שינויים שנמחקו ותמונות שבתוכו/)).toBeInTheDocument();
+    expect(screen.getByText(/ושוב עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קובץ אחר; כל שליחה כזאת עולה כסף\. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב/)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת'), 'vision-model');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.fileModel).toBe('vision-model');
+  });
+
   it('offers a model for every mode, and says what each one sends', async () => {
     await openSettings();
     expect(screen.getByLabelText('מודל למצב "חשבון"')).toBeInTheDocument();
     expect(screen.getByLabelText('מודל למצב "חיפוש"')).toBeInTheDocument();
     expect(screen.getByText(/במצב "חיפוש" מה שהיא כותבת במצב הזה נשלח, דרך הספק, גם למנוע חיפוש/)).toBeInTheDocument();
+    expect(screen.getByText(/את האתרים האלה האפליקציה והנחיות הבטיחות לא בודקות: מה שמסנן אותם הוא רק "זמן מסך" של האייפון/)).toBeInTheDocument();
     expect(screen.getByLabelText('מודל למצב "ציור"')).toBeInTheDocument();
     expect(screen.getByText(/במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים\. האפליקציה שומרת את התמונות רק באייפון הזה; בלחיצה ארוכה על תמונה היא יכולה לשמור או לשתף אותה בעצמה/)).toBeInTheDocument();
   });
@@ -345,6 +360,68 @@ describe('the settings', () => {
   });
 });
 
+describe('who uses the app', () => {
+  const box = () => screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }) as HTMLInputElement;
+  const save = () => userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+
+  it("is a child on a phone where nothing else was saved, and saving keeps it that way", async () => {
+    const { phone } = await openSettings();
+    expect(box().checked).toBe(true);
+    expect(screen.getByText(/מסומן: עם כל הודעה נשלחות לספק הנחיות הבטיחות המובנות לילדים/)).toBeInTheDocument();
+    expect(screen.queryByText(/המודל עונה כמו למבוגר/)).not.toBeInTheDocument();
+    await save();
+    expect(phone.settings.parentUse).toBeUndefined();
+  });
+
+  it('warns as soon as it is unticked, and saves the parent\'s own use only on "save"', async () => {
+    const { phone } = await openSettings();
+    await userEvent.click(box());
+    expect(box().checked).toBe(false);
+    expect(screen.getByText(/הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר/)).toBeInTheDocument();
+    expect(screen.getByText(/חשוב לסמן אותה\s+ולשמור לפני שהאייפון חוזר לילדה/)).toBeInTheDocument();
+    // The parent is told what else goes, that these chats are not kept, and that it doesn't end by itself.
+    expect(screen.getByText(/ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה/)).toBeInTheDocument();
+    expect(screen.getByText(/שיחות במצב הזה לא נשמרות באייפון\s+ולא מופיעות ברשימת השיחות שלה/)).toBeInTheDocument();
+    expect(screen.getByText(/המצב הזה לא מסתיים מעצמו/)).toBeInTheDocument();
+    expect(screen.getByText(/מגבלת ההודעות היומית חלה גם כאן/)).toBeInTheDocument();
+    // Nothing changed on the phone yet.
+    expect(phone.settings.parentUse).toBeUndefined();
+    await save();
+    expect(screen.getByText('נשמר.')).toBeInTheDocument();
+    expect(phone.settings.parentUse).toBe(true);
+  });
+
+  it("shows a saved parent's own use, and goes back to a child when it is ticked again and saved", async () => {
+    const { phone } = await openSettings({
+      settings: { provider: 'venice', models: { chat: 'm', search: '', math: '', draw: '' }, systemPrompt: '', childName: '', dailyLimit: null, parentUse: true },
+    });
+    expect(box().checked).toBe(false);
+    expect(screen.getByText(/המודל עונה כמו למבוגר/)).toBeInTheDocument();
+    await userEvent.click(box());
+    expect(box().checked).toBe(true);
+    await save();
+    expect(phone.settings.parentUse).toBeUndefined();
+    expect(JSON.stringify(phone.settings)).not.toContain('parentUse');
+  });
+
+  it('shows the built-in instructions word for word, as they are sent', async () => {
+    await openSettings();
+    expect(screen.getByText('הנחיות הבטיחות המובנות, כפי שהן נשלחות')).toBeInTheDocument();
+    // Everything the app itself adds, for a child and in a parent's own use: nothing is sent that isn't shown here.
+    for (const lines of [BASELINE_PROMPT, SEARCH_BASELINE, FILE_BASELINE, IMAGE_BASELINE, SEARCH_BASELINE_PARENT, FILE_BASELINE_PARENT]) {
+      const shown = screen.getByText(lines);
+      expect(shown).toHaveAttribute('dir', 'ltr');
+      expect(shown.closest('details')).not.toBeNull();
+    }
+  });
+
+  it('is not on the screen before the code is entered', () => {
+    open({ pin: '2468' });
+    expect(screen.queryByRole('checkbox')).not.toBeInTheDocument();
+    expect(screen.queryByText(BASELINE_PROMPT)).not.toBeInTheDocument();
+  });
+});
+
 describe('data on the phone', () => {
   it("shows today's count and resets it", async () => {
     const { phone } = await openSettings({ sent: 12 });
@@ -376,5 +453,42 @@ describe('data on the phone', () => {
     await userEvent.click(screen.getByRole('button', { name: 'כן, למחוק הכול' }));
     expect(await screen.findByText('המחיקה לא הצליחה. כדאי לנסות שוב.')).toBeInTheDocument();
     expect(onChatsDeleted).not.toHaveBeenCalled();
+  });
+});
+
+describe('the version line', () => {
+  const SHA = '0123456789abcdef0123456789abcdef01234567';
+  const link = () => screen.getByRole('link', { name: 'GitHub' });
+
+  it('shows the short commit and when it was made, left to right, and links to that commit outside the app', async () => {
+    await openSettings();
+    const label = screen.getByText('0123456');
+    expect(label.tagName).toBe('BDI');
+    expect(label).toHaveAttribute('dir', 'ltr');
+    const when = new Intl.DateTimeFormat('he-IL', { dateStyle: 'short', timeStyle: 'short' }).format(new Date('2026-11-12T14:05:00+02:00'));
+    expect(screen.getByText(when)).toHaveAttribute('dir', 'ltr');
+
+    expect(link()).toHaveAttribute('href', `https://github.com/castroi/kid-llm/commit/${SHA}`);
+    expect(link()).toHaveAttribute('target', '_blank');
+    expect(link()).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link()).toHaveAttribute('referrerpolicy', 'no-referrer');
+  });
+
+  it('says "dev" with no date, and links to the repository, for a build that does not know its commit', async () => {
+    await openSettings({ version: appVersion('', '') });
+    expect(screen.getByText('dev')).toBeInTheDocument();
+    expect(screen.getByText('dev').closest('p')).toHaveTextContent(/^גרסה dev$/);
+    expect(link()).toHaveAttribute('href', 'https://github.com/castroi/kid-llm');
+  });
+
+  it('is not shown before the code is entered: she gets no link out of the app', () => {
+    open({ pin: '2468' });
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+    expect(screen.queryByText('0123456')).not.toBeInTheDocument();
+  });
+
+  it('is not shown while a first code is being chosen either', () => {
+    open();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 });

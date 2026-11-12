@@ -1,4 +1,6 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
+import { dataUrl, SENT_FILE_NAMES, type ChatFile } from './files';
+import { sanitizeSources, type Source } from './sources';
 import { LineTooLongError, sseData } from './sse';
 
 /**
@@ -8,6 +10,7 @@ import { LineTooLongError, sseData } from './sse';
  * Adapted from kid-closet's src/ai/providers.ts.
  * Docs: Venice https://docs.venice.ai/api-reference/endpoint/chat/completions
  *       and https://docs.venice.ai/api-reference/endpoint/image/generate
+ *       Files in a chat: https://docs.venice.ai/guides/features/vision and .../guides/features/file-inputs
  */
 
 /** Why a call failed. The kid sees one friendly line; the parent area shows the reason. */
@@ -44,11 +47,13 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** A picture or a document she attached to this message (src/ai/files.ts). Only on a message of hers. */
+  file?: ChatFile;
 }
 
 export interface ChatCall {
   model: string;
-  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first, never empty. */
+  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first. Empty only in a parent's own use with nothing written: then no system message is sent. */
   systemPrompt: string;
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
@@ -68,6 +73,8 @@ export interface ChatResult {
   text: string;
   /** Why the provider stopped ("stop", "length", "content_filter"), when it said. */
   finishReason: string | null;
+  /** Search mode only: the websites the answer was drawn from, when the provider named any (src/ai/sources.ts). */
+  sources?: Source[];
 }
 
 /** A picture as it came from the provider and as it is kept on the phone. */
@@ -213,16 +220,19 @@ function headers(apiKey: string, json: boolean): Record<string, string> {
 interface StreamChunk {
   error?: unknown;
   choices?: { delta?: { content?: unknown }; finish_reason?: unknown }[];
+  /** Venice: the pages a web search found, in `web_search_citations` (its docs: "in the first chunk of a streaming result"). */
+  venice_parameters?: { web_search_citations?: unknown } | null;
 }
 
 /**
  * Reads a streamed chat answer in the OpenAI-compatible format: one JSON chunk per
  * "data:" line with the next piece of text, then "data: [DONE]".
  */
-async function readChatStream(response: Response, { apiKey, signal, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
+async function readChatStream(response: Response, { apiKey, signal, webSearch, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
   if (!response.body) throw new AiError('bad-response', 'no answer body');
   let text = '';
   let finishReason: string | null = null;
+  let sources: Source[] = [];
   // An exception from the screen's own code is not a network failure; it passes through as it is.
   const fromCaller: { thrown: boolean; error?: unknown } = { thrown: false };
   try {
@@ -238,6 +248,9 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
         continue; // a keep-alive or a line we don't know; the text lines still count
       }
       if (chunk?.error) throw new AiError('provider-down', redact(errorMessage(chunk.error), apiKey).slice(0, 300));
+      // Read in search mode only, wherever in the stream they arrive; the first list that
+      // holds a usable address is kept. Only the addresses are taken (src/ai/sources.ts).
+      if (webSearch && sources.length === 0) sources = sanitizeSources(chunk?.venice_parameters?.web_search_citations);
       const choice = chunk?.choices?.[0];
       if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason;
       const delta = choice?.delta?.content;
@@ -260,7 +273,21 @@ async function readChatStream(response: Response, { apiKey, signal, onDelta, onA
     if (err instanceof LineTooLongError) throw new AiError('bad-response', 'line too long');
     throw new AiError('network', errorName(err));
   }
-  return { text, finishReason };
+  return sources.length > 0 ? { text, finishReason, sources } : { text, finishReason };
+}
+
+/**
+ * One turn as Venice takes it. A message with a file is sent in parts: her text first, then
+ * the file inside the request itself as a `data:` address. A picture goes to a vision model
+ * as it is; Venice turns a document into text before the model sees it.
+ */
+function veniceMessage({ role, content, file }: ChatMessage): unknown {
+  if (!file || role !== 'user') return { role, content };
+  const part =
+    file.kind === 'image'
+      ? { type: 'image_url', image_url: { url: dataUrl(file) } }
+      : { type: 'file', file: { file_data: dataUrl(file), filename: SENT_FILE_NAMES[file.kind] } };
+  return { role, content: [{ type: 'text', text: content }, part] };
 }
 
 const venice: ProviderAdapter = {
@@ -271,7 +298,7 @@ const venice: ProviderAdapter = {
       headers: headers(apiKey, true),
       body: JSON.stringify({
         model,
-        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        messages: [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages.map(veniceMessage)],
         stream: true,
         // Venice adds its own system prompt unless told not to; only the parent's goes with her chat.
         // Search mode always searches ("on"), so she gets what she picked; other modes never do.

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AiErrorReason } from '../ai/providers';
-import { kidMessage } from './kidMessages';
+import { attachmentMessage, kidMessage } from './kidMessages';
 
 const ALL: AiErrorReason[] = ['unauthorized', 'no-credit', 'rate-limited', 'bad-request', 'provider-down', 'refused', 'network', 'timeout', 'cancelled', 'bad-response'];
 
@@ -25,5 +25,13 @@ describe('kidMessage', () => {
       const { text } = kidMessage(reason);
       expect(text, reason).toMatch(/^[֐-׿ .,!?'"-]+$/);
     }
+  });
+});
+
+describe('attachmentMessage', () => {
+  it('is one friendly line of Hebrew for each problem, each different', () => {
+    const texts = (['unsupported', 'too-large', 'unreadable'] as const).map(attachmentMessage);
+    for (const text of texts) expect(text).toMatch(/^[֐-׿ .,!?'"-]+$/);
+    expect(new Set(texts).size).toBe(3);
   });
 });

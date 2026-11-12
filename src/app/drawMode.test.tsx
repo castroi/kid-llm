@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { AiError, type GeneratedImage } from '../ai/providers';
@@ -26,7 +26,7 @@ afterAll(() => {
   URL.revokeObjectURL = revokeObjectURL;
 });
 
-function openApp(options: { draw?: Draw; store?: ChatStore | null; dailyLimit?: number | null; drawModel?: string } = {}) {
+function openApp(options: { draw?: Draw; store?: ChatStore | null; dailyLimit?: number | null; drawModel?: string; parentUse?: true } = {}) {
   const pictures: ImageRequest[] = [];
   const chats: ChatRequest[] = [];
   let sent = 0;
@@ -39,6 +39,7 @@ function openApp(options: { draw?: Draw; store?: ChatStore | null; dailyLimit?: 
       systemPrompt: 'Be kind.',
       childName: '',
       dailyLimit: options.dailyLimit ?? null,
+      ...(options.parentUse ? { parentUse: true as const } : {}),
     }),
     loadApiKey: () => 'sk-test',
     sendChat: async (request) => {
@@ -46,6 +47,7 @@ function openApp(options: { draw?: Draw; store?: ChatStore | null; dailyLimit?: 
       request.onDelta('תשובה');
       return { text: 'תשובה', finishReason: 'stop' };
     },
+    prepareAttachment: () => Promise.reject(new Error('no files in this test')),
     generateImage: (request) => {
       pictures.push(request);
       return (options.draw ?? (async () => PICTURE))(request);
@@ -79,6 +81,26 @@ async function ask(text: string) {
 const hangs: Draw = (request) => new Promise((_, reject) => request.signal?.addEventListener('abort', () => reject(new AiError('cancelled'))));
 
 describe('drawing mode', () => {
+  it("asks for a picture in exactly the same way in a parent's own use: the switch reaches no picture request", async () => {
+    const asChild = openApp();
+    await pickDraw();
+    await ask('דרקון קטן');
+    await screen.findByRole('img', { name: 'התמונה שציירתי' });
+    cleanup();
+
+    const asParent = openApp({ parentUse: true });
+    await pickDraw();
+    await ask('דרקון קטן');
+    await screen.findByRole('img', { name: 'התמונה שציירתי' });
+
+    // The same fields with the same values (the stop signal aside), and no chat call either way:
+    // safe mode and the child-safety line are added below this, for every picture (src/ai/image.test.ts).
+    const sent = ({ signal, ...rest }: ImageRequest) => ({ ...rest, hasSignal: signal !== undefined });
+    expect(sent(asParent.pictures[0])).toEqual(sent(asChild.pictures[0]));
+    expect(sent(asParent.pictures[0])).toEqual({ provider: 'venice', model: 'image-model', prompt: 'דרקון קטן', apiKey: 'sk-test', hasSignal: true });
+    expect(asParent.chats).toHaveLength(0);
+  });
+
   it('makes a picture of what she wrote, with the drawing model, and shows it', async () => {
     const { pictures, chats } = openApp();
     await pickDraw();

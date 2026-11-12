@@ -118,6 +118,19 @@ button:disabled {
   background: transparent;
 }
 
+/* Shown under the top bar for as long as a parent has the child instructions switched off. */
+.parent-use {
+  margin: 0 12px 6px;
+  padding: 8px 14px;
+  font-size: 15px;
+  font-weight: 500;
+  text-align: center;
+  color: var(--danger);
+  background: var(--surface);
+  border: 1px solid var(--danger);
+  border-radius: 14px;
+}
+
 /* The only part that scrolls; the top bar and the composer stay in place. */
 .scroll {
   flex: 1;
@@ -215,14 +228,40 @@ button:disabled {
   padding: 12px 16px 0;
 }
 
-/* Her message: at the start of the line (the right, in Hebrew). */
-.bubble {
+/* Her message with its copy button under it: at the start of the line (the right, in Hebrew). */
+.mine {
   align-self: flex-start;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
   max-width: 85%;
+}
+
+.bubble {
+  max-width: 100%;
   padding: 12px 16px;
   border-radius: 22px;
   background: var(--accent-tint);
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What she attached, inside her own message. */
+.attached-picture {
+  display: block;
+  max-width: 100%;
+  max-height: 240px;
+  margin-bottom: 8px;
+  border-radius: 14px;
+}
+
+.attached-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 15px;
   overflow-wrap: anywhere;
 }
 
@@ -281,6 +320,36 @@ button:disabled {
   margin: 0;
   font-size: 15px;
   color: var(--muted);
+}
+
+/* Where a search answer came from: one link per site, each a full touch target. */
+.sources {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.source-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.source-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 48px;
+  max-width: 100%;
+  padding: 0 14px;
+  font-size: 15px;
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  overflow-wrap: anywhere;
 }
 
 .small-button {
@@ -346,6 +415,42 @@ button:disabled {
 
 .composer-input::placeholder {
   color: var(--muted);
+}
+
+/* A file waiting to be sent with the message. */
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline-start: 12px;
+  font-size: 15px;
+  background: var(--accent-tint);
+  border-radius: 14px;
+}
+
+.attachment-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-status {
+  margin: 0;
+  font-size: 15px;
+  color: var(--muted);
+}
+
+.composer-status:empty {
+  display: none;
+}
+
+.composer-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
 }
 
 .composer-row {
@@ -579,6 +684,53 @@ textarea.input {
   font-size: 15px;
   line-height: 1.5;
   color: var(--muted);
+}
+
+.hint.warning {
+  color: var(--danger);
+}
+
+/* A tick box with its label: the whole row is the touch target. */
+.field label.check {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  font-size: 17px;
+  color: var(--ink);
+}
+
+.check input {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+/* The built-in instructions, folded away until a parent wants to read them. */
+.builtin summary {
+  padding: 13px 0;
+  font-size: 15px;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.builtin-text {
+  margin: 4px 0 12px;
+  font-size: 15px;
+  line-height: 1.5;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+/* Which build is on the phone, at the bottom of the parent's settings. */
+.version {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
 }
 
 .button {

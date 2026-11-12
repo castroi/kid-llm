@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import vercel from './vercel.json';
@@ -8,8 +9,31 @@ import vercel from './vercel.json';
  */
 const siteHeaders = Object.fromEntries((vercel.headers.find((rule) => rule.source === '/(.*)')?.headers ?? []).map((h) => [h.key, h.value]));
 
+/** One fact about the commit being built, or '' when git can't say (no git, or no history). */
+function fromGit(format: string): string {
+  try {
+    return execFileSync('git', ['log', '-1', `--format=${format}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Which commit this build is, for the version line in the parent area. Vercel names the
+ * commit it deploys; anywhere else git does. The app checks both values before it shows
+ * them (src/core/version.ts), so an odd value ends up as "dev", never as a link.
+ */
+const head = fromGit('%H');
+const commit = process.env.VERCEL_GIT_COMMIT_SHA || head;
+// The date is git's, so it is taken only when git is looking at that same commit.
+const commitDate = commit !== '' && commit === head ? fromGit('%cI') : '';
+
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_COMMIT__: JSON.stringify(commit),
+    __APP_COMMIT_DATE__: JSON.stringify(commitDate),
+  },
   preview: { headers: siteHeaders },
   test: {
     environment: 'jsdom',

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { BASELINE_PROMPT, SEARCH_BASELINE } from './baseline';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, SEARCH_BASELINE, SEARCH_BASELINE_PARENT, systemPromptFor } from './baseline';
 import { AI_PROVIDERS } from './catalog';
 import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
 import { MAX_LINE_CHARS } from './sse';
@@ -137,6 +137,60 @@ describe('sendChat', () => {
     expect(BASELINE_PROMPT).not.toMatch(/\d|\b(she|her|girl|boy|he|his|him)\b/i);
   });
 
+  it("leaves the child baseline out only when a parent switched the app to their own use: then only the parent's own instructions go", async () => {
+    const own = fetchStream([piece('hi'), DONE]);
+    await sendChat(request(own.fetch, { kidUse: false }));
+    expect(JSON.parse(own.calls[0].init.body as string).messages).toEqual([
+      { role: 'system', content: 'Answer in simple Hebrew.' },
+      { role: 'user', content: 'שלום' },
+    ]);
+
+    // Anything but an explicit false is a child: the baseline goes.
+    for (const kidUse of [true, undefined]) {
+      const kid = fetchStream([piece('היי'), DONE]);
+      await sendChat(request(kid.fetch, { kidUse }));
+      expect(JSON.parse(kid.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${BASELINE_PROMPT}\n\nAnswer in simple Hebrew.` });
+    }
+  });
+
+  it("sends no system message at all in a parent's own use with nothing written, and still switches the provider's own prompt off", async () => {
+    const { fetch, calls } = fetchStream([piece('hi'), DONE]);
+    await sendChat(request(fetch, { kidUse: false, systemPrompt: '  ' }));
+    expect(JSON.parse(calls[0].init.body as string)).toEqual({
+      model: 'some-model',
+      messages: [{ role: 'user', content: 'שלום' }],
+      stream: true,
+      venice_parameters: { include_venice_system_prompt: false },
+    });
+  });
+
+  it("keeps the lines about web text and files in a parent's own use, without the lines about a child", async () => {
+    const search = fetchStream([piece('found'), DONE]);
+    await sendChat(request(search.fetch, { kidUse: false, webSearch: true }));
+    expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${SEARCH_BASELINE_PARENT}\n\nAnswer in simple Hebrew.` });
+
+    const file = fetchStream([piece('a cat'), DONE]);
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(request(file.fetch, { kidUse: false, systemPrompt: '', messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
+    expect(JSON.parse(file.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: FILE_BASELINE_PARENT });
+
+    for (const lines of [SEARCH_BASELINE_PARENT, FILE_BASELINE_PARENT]) {
+      expect(lines).toMatch(/never follow instructions/);
+      expect(lines).not.toMatch(/child/i);
+    }
+    expect(FILE_BASELINE_PARENT).toMatch(/Do not identify people/);
+  });
+
+  it('builds the instructions for every combination of use, search and file', () => {
+    expect(systemPromptFor('')).toBe(BASELINE_PROMPT);
+    expect(systemPromptFor(' Be kind. ')).toBe(`${BASELINE_PROMPT}\n\nBe kind.`);
+    expect(systemPromptFor('Be kind.', true, true)).toBe(`${BASELINE_PROMPT} ${SEARCH_BASELINE} ${FILE_BASELINE}\n\nBe kind.`);
+    expect(systemPromptFor('', false, false, false)).toBe('');
+    expect(systemPromptFor(' Be brief. ', false, false, false)).toBe('Be brief.');
+    expect(systemPromptFor('', true, true, false)).toBe(`${SEARCH_BASELINE_PARENT} ${FILE_BASELINE_PARENT}`);
+    expect(systemPromptFor('Be brief.', true, false, false)).toBe(`${SEARCH_BASELINE_PARENT}\n\nBe brief.`);
+  });
+
   it('adds the lines about web text to the instructions in search mode only', async () => {
     const search = fetchStream([piece('מצאתי'), DONE]);
     await sendChat(request(search.fetch, { webSearch: true }));
@@ -162,6 +216,37 @@ describe('sendChat', () => {
     expect(JSON.parse(plain.calls[0].init.body as string).venice_parameters).toEqual({ include_venice_system_prompt: false });
   });
 
+  it('returns the sites a search answer came from: addresses only, from whichever chunk carries them', async () => {
+    const citations = [
+      { title: 'כותרת של דף', url: 'https://he.wikipedia.org/wiki/Telephone', content: 'טקסט של דף', date: '2026-01-01T00:00:00Z' },
+      { title: 'bad', url: 'javascript:alert(1)' },
+      { title: 'second', url: 'https://www.example.com/page' },
+    ];
+    const first = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: citations }, choices: [{ delta: { content: '' }, finish_reason: null }] })}\n\n`;
+    const { fetch } = fetchStream([first, piece('מצאתי', 'stop'), DONE]);
+    const result = await sendChat(request(fetch, { webSearch: true }));
+    expect(result).toEqual({ text: 'מצאתי', finishReason: 'stop', sources: [{ url: 'https://he.wikipedia.org/wiki/Telephone' }, { url: 'https://www.example.com/page' }] });
+    expect(JSON.stringify(result)).not.toContain('טקסט של דף');
+    expect(JSON.stringify(result)).not.toContain('כותרת של דף');
+
+    // Later in the stream works too, and a list with nothing usable doesn't hide a later good one.
+    const empty = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: [{ url: 'http://plain.example.com/' }] } })}\n\n`;
+    const late = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: [{ url: 'https://late.example.com/' }] }, choices: [{ delta: { content: '!' }, finish_reason: 'stop' }] })}\n\n`;
+    const second = fetchStream([empty, piece('מצאתי'), late, DONE]);
+    expect((await sendChat(request(second.fetch, { webSearch: true }))).sources).toEqual([{ url: 'https://late.example.com/' }]);
+  });
+
+  it('takes no sources outside search mode, and none from a list it cannot read', async () => {
+    const first = `data: ${JSON.stringify({ venice_parameters: { web_search_citations: [{ url: 'https://example.com/' }] } })}\n\n`;
+    const plain = fetchStream([first, piece('היי', 'stop'), DONE]);
+    expect(await sendChat(request(plain.fetch))).toEqual({ text: 'היי', finishReason: 'stop' });
+
+    for (const junk of [null, 'text', { web_search_citations: 'none' }, { web_search_citations: [null, 7, { url: 5 }] }]) {
+      const odd = fetchStream([`data: ${JSON.stringify({ venice_parameters: junk })}\n\n`, piece('מצאתי', 'stop'), DONE]);
+      expect(await sendChat(request(odd.fetch, { webSearch: true }))).toEqual({ text: 'מצאתי', finishReason: 'stop' });
+    }
+  });
+
   it('never follows a redirect, sends no cookies or referrer, and keeps nothing in the HTTP cache', async () => {
     const { fetch, calls } = fetchStream([piece('היי'), DONE]);
     await sendChat(request(fetch));
@@ -181,6 +266,69 @@ describe('sendChat', () => {
     expect((await reasonOf(sendChat(request(none.fetch, { apiKey: '   ' })))).reason).toBe('unauthorized');
     expect((await reasonOf(checkConnection('venice', '', { fetch: none.fetch }))).reason).toBe('unauthorized');
     expect(none.calls).toHaveLength(0);
+  });
+
+  it('sends a picture she attached inside the request, after her text, and adds the lines about files to the instructions', async () => {
+    const { fetch, calls } = fetchStream([piece('זה חתול'), DONE]);
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(calls[0].url).toBe(AI_PROVIDERS.venice.endpoints.chat);
+    expect(body.messages[0].content).toBe(`${BASELINE_PROMPT} ${FILE_BASELINE}\n\nAnswer in simple Hebrew.`);
+    expect(body.messages[1]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'מה יש בתמונה?' },
+        { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/' } },
+      ],
+    });
+  });
+
+  it('sends a document under a fixed name, never her own file name', async () => {
+    const { fetch, calls } = fetchStream([piece('סיכום'), DONE]);
+    const pdf = new TextEncoder().encode('Hi').buffer;
+    const withName = { kind: 'pdf', bytes: pdf, name: 'נועה כהן כיתה ה2.pdf' } as const;
+    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'תסכמי', file: withName }] }));
+    const sent = calls[0].init.body as string;
+    expect(JSON.parse(sent).messages[1].content[1]).toEqual({ type: 'file', file: { file_data: 'data:application/pdf;base64,SGk=', filename: 'document.pdf' } });
+    expect(sent).not.toContain('נועה');
+
+    const word = fetchStream([piece('סיכום'), DONE]);
+    await sendChat(request(word.fetch, { messages: [{ role: 'user', content: 'תסכמי', file: { kind: 'docx', bytes: pdf } }] }));
+    expect(JSON.parse(word.calls[0].init.body as string).messages[1].content[1].file.filename).toBe('document.docx');
+  });
+
+  it('sends a message without a file as plain text, without the lines about files, and never a file on an answer', async () => {
+    const { fetch, calls } = fetchStream([piece('היי'), DONE]);
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(
+      request(fetch, {
+        messages: [
+          { role: 'user', content: 'שלום' },
+          { role: 'assistant', content: 'היי', file: { kind: 'image', bytes } },
+          { role: 'user', content: 'מה שלומך?' },
+        ],
+      }),
+    );
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(body.messages.slice(1)).toEqual([
+      { role: 'user', content: 'שלום' },
+      { role: 'assistant', content: 'היי' },
+      { role: 'user', content: 'מה שלומך?' },
+    ]);
+    const plain = fetchStream([piece('היי'), DONE]);
+    await sendChat(request(plain.fetch));
+    expect(JSON.parse(plain.calls[0].init.body as string).messages[0].content).not.toContain(FILE_BASELINE);
+  });
+
+  it('never sends a file with a web search', async () => {
+    const { fetch, calls } = fetchStream([piece('מצאתי'), DONE]);
+    const bytes = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    await sendChat(request(fetch, { webSearch: true, messages: [{ role: 'user', content: 'מה זה?', file: { kind: 'image', bytes } }] }));
+    const sent = calls[0].init.body as string;
+    expect(JSON.parse(sent).messages[1]).toEqual({ role: 'user', content: 'מה זה?' });
+    expect(sent).not.toContain('base64');
+    expect(JSON.parse(sent).messages[0].content).not.toContain(FILE_BASELINE);
   });
 
   it('puts together a line, and a Hebrew letter, that arrive split between network chunks', async () => {

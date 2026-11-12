@@ -7,7 +7,8 @@ import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, t
  * a timeout, and checks that an answer came back. Adapted from kid-closet's src/ai/send.ts.
  *
  * The provider keeps nothing between calls: every call carries the whole conversation
- * (`messages`). The baseline instructions (src/ai/baseline.ts) go first, then the parent's.
+ * (`messages`). The baseline instructions (src/ai/baseline.ts) go first, then the parent's;
+ * the child baseline is left out only when a parent switched the app to their own use.
  */
 
 /** Nothing from the provider for this long means the call hangs. A long answer is fine: everything it sends restarts the clock. */
@@ -85,9 +86,14 @@ export interface ChatRequest {
   provider: AiProviderId;
   /** The model the parent chose for the mode she is in. */
   model: string;
-  /** What the parent wrote; may be empty. The baseline instructions are always sent before it. */
+  /** What the parent wrote; may be empty. The baseline instructions are sent before it unless `kidUse` is false. */
   systemPrompt: string;
-  /** The whole conversation so far, oldest first, ending with her new message. */
+  /**
+   * False only when a parent switched the app to their own use in the parent area: the
+   * child baseline is then left out. Anything else, also when it is missing, means a child.
+   */
+  kidUse?: boolean;
+  /** The whole conversation so far, oldest first, ending with her new message. A message may carry a file she attached. */
   messages: ChatMessage[];
   apiKey: string;
   /** Search mode: look the question up on the web first. What is sent in `messages` then also reaches a search engine, through the provider. */
@@ -108,11 +114,14 @@ export interface ChatRequest {
  */
 export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const apiKey = usableKey(req.apiKey);
+  // A search call never carries a file: what goes into a search also reaches a search engine.
+  const messages: ChatMessage[] = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
+  const withFile = messages.some((message) => message.file !== undefined);
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
-      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true),
-      messages: req.messages,
+      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true, withFile, req.kidUse !== false),
+      messages,
       apiKey,
       webSearch: req.webSearch === true,
       signal,

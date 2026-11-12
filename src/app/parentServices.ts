@@ -1,4 +1,5 @@
 import type { AiProviderId } from '../ai/catalog';
+import type { AppVersion } from '../core/version';
 import type { PinResult } from '../storage/pin';
 import type { Settings } from '../storage/settings';
 
@@ -28,4 +29,6 @@ export interface ParentServices {
   resetUsage: () => boolean;
   /** Removes every chat from the phone. Rejects when it could not. */
   deleteAllChats: () => Promise<void>;
+  /** Which build of the app is on this phone. */
+  version: AppVersion;
 }
