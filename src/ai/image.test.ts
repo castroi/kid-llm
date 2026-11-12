@@ -147,4 +147,29 @@ describe('generateImage', () => {
     expect((await reasonOf(generateImage(request(fetch, { apiKey: '  ' })))).reason).toBe('unauthorized');
     expect(calls).toHaveLength(0);
   });
+
+  it('still gives the right reason when the connection fails while a picture is being thrown away', async () => {
+    // A body that is never finished and can't be cancelled, as on a connection that already broke.
+    const unclosable = (chunk: Uint8Array) => {
+      let sent = false;
+      return new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent) return new Promise<void>(() => undefined);
+          sent = true;
+          controller.enqueue(chunk);
+        },
+        cancel() {
+          throw new TypeError('Load failed');
+        },
+      });
+    };
+    const blurred = fetchPicture({ headers: { 'x-venice-is-blurred': 'true', 'x-venice-is-content-violation': 'false' }, body: unclosable(PICTURE) });
+    expect((await reasonOf(generateImage(request(blurred.fetch)))).reason).toBe('refused');
+    const page = fetchPicture({ type: 'text/html', body: unclosable(PICTURE) });
+    expect((await reasonOf(generateImage(request(page.fetch)))).reason).toBe('bad-response');
+    const huge = fetchPicture({ body: unclosable(new Uint8Array(MAX_IMAGE_BYTES + 1)) });
+    const err = await reasonOf(generateImage(request(huge.fetch)));
+    expect(err.reason).toBe('bad-response');
+    expect(err.detail).toBe('picture too large');
+  });
 });
