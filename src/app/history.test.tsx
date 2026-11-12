@@ -194,53 +194,15 @@ describe('the list of chats', () => {
     expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
   });
 
-  it('deletes a chat only after she confirms', async () => {
+  it('gives her no way to delete a chat: the options hold only the rename', async () => {
     const store = memoryStore([savedChat('a', 'למה השמיים כחולים?', NOW - DAY), savedChat('b', 'שברים פשוטים', NOW - HOUR)]);
     openApp(store);
     const list = await openList();
     await userEvent.click(await list.findByRole('button', { name: 'אפשרויות לשיחה: שברים פשוטים' }));
-    await userEvent.click(list.getByRole('button', { name: 'מחיקה' }));
-    expect(store.chats.size).toBe(2);
-    await userEvent.click(list.getByRole('button', { name: 'ביטול' }));
-    expect(store.chats.size).toBe(2);
-
-    await userEvent.click(list.getByRole('button', { name: 'אפשרויות לשיחה: שברים פשוטים' }));
-    await userEvent.click(list.getByRole('button', { name: 'מחיקה' }));
-    await userEvent.click(list.getByRole('button', { name: 'כן, למחוק' }));
-    await waitFor(() => expect(list.queryByRole('button', { name: 'שברים פשוטים' })).not.toBeInTheDocument());
-    expect([...store.chats.keys()]).toEqual(['a']);
-  });
-
-  it('clears the screen when the chat she is in is deleted', async () => {
-    const store = memoryStore();
-    openApp(store);
-    await say('שלום');
-    await screen.findByText('היי!');
-    const list = await openList();
-    await userEvent.click(await list.findByRole('button', { name: 'אפשרויות לשיחה: שלום' }));
-    await userEvent.click(list.getByRole('button', { name: 'מחיקה' }));
-    await userEvent.click(list.getByRole('button', { name: 'כן, למחוק' }));
-    await waitFor(() => expect(store.chats.size).toBe(0));
-    await userEvent.click(list.getByRole('button', { name: 'סגירת הרשימה' }));
-    expect(screen.queryByText('היי!')).not.toBeInTheDocument();
-    expect(title()).toBe('שיחה חדשה');
-  });
-
-  it('does not bring a deleted chat back when its answer was still being written', async () => {
-    const store = memoryStore();
-    openApp(store, hangs);
-    await say('שלום');
-    await screen.findByText('חצי תשובה');
-    expect(store.chats.size).toBe(1);
-
-    const list = await openList();
-    await userEvent.click(await list.findByRole('button', { name: 'אפשרויות לשיחה: שלום' }));
-    await userEvent.click(list.getByRole('button', { name: 'מחיקה' }));
-    await userEvent.click(list.getByRole('button', { name: 'כן, למחוק' }));
-    await waitFor(() => expect(list.queryByRole('button', { name: 'שלום' })).not.toBeInTheDocument());
-    // The stopped answer's last save found the chat gone and wrote nothing.
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(store.chats.size).toBe(0);
+    expect(list.getByRole('button', { name: 'שינוי שם' })).toBeInTheDocument();
+    expect(list.queryByRole('button', { name: /מחיקה|למחוק/ })).not.toBeInTheDocument();
+    expect(list.queryByText(/מחיקה|למחוק/)).not.toBeInTheDocument();
+    expect([...store.chats.keys()]).toEqual(['a', 'b']);
   });
 
   it('keeps what was written when she leaves a chat in the middle of an answer', async () => {

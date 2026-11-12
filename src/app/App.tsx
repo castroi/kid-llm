@@ -23,7 +23,7 @@ function readSetup(services: Services) {
 }
 
 export function App({ services, parent }: { services: Services; parent: ParentServices }) {
-  const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat, removeChat } = useChat(services);
+  const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat } = useChat(services);
   const [inHistory, setInHistory] = useState(false);
   const [pickingMode, setPickingMode] = useState(false);
   const [inParentArea, setInParentArea] = useState(false);
@@ -122,7 +122,6 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
           list={listChats}
           onOpen={openChat}
           onRename={renameChat}
-          onRemove={removeChat}
           onNew={startNewChat}
           onParentArea={() => setInParentArea(true)}
           onClose={() => setInHistory(false)}

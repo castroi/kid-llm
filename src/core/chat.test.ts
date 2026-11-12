@@ -287,3 +287,36 @@ describe('pictures', () => {
     ]);
   });
 });
+
+describe('sources of a search answer', () => {
+  const chatWith = (sources: unknown, role: StoredMessage['role'] = 'assistant', mode = 'search') => ({
+    id: 'c1',
+    title: 'חיפוש',
+    mode: 'search',
+    createdAt: 1,
+    updatedAt: 2,
+    messages: [
+      { id: 'q', role: 'user', text: 'מי המציא את הטלפון?', at: 1, mode: 'search' },
+      { id: 'a', role, text: 'אלכסנדר גרהם בל', at: 2, mode, sources },
+    ],
+  });
+
+  it('are kept with their answer when the chat is read back, as addresses only', () => {
+    const kept = sanitizeChat(chatWith([{ url: 'https://he.wikipedia.org/wiki/x', title: 'כותרת', content: 'טקסט' }]))?.messages[1];
+    expect(kept?.sources).toEqual([{ url: 'https://he.wikipedia.org/wiki/x' }]);
+  });
+
+  it('are dropped when they are not safe addresses, or sit on a message of hers or outside search mode', () => {
+    for (const sources of [[{ url: 'javascript:alert(1)' }], [{ url: 'http://example.com/' }], 'https://example.com/', null, [], [null]]) {
+      expect(sanitizeChat(chatWith(sources))?.messages[1]).not.toHaveProperty('sources');
+    }
+    const good = [{ url: 'https://example.com/' }];
+    expect(sanitizeChat(chatWith(good, 'user'))?.messages[1]).not.toHaveProperty('sources');
+    expect(sanitizeChat(chatWith(good, 'assistant', 'chat'))?.messages[1]).not.toHaveProperty('sources');
+  });
+
+  it('are never sent to a model', () => {
+    const talk = [message('user', 'מי המציא את הטלפון?', { mode: 'search' }), message('assistant', 'בל', { mode: 'search', sources: [{ url: 'https://example.com/' }] }), message('user', 'ומתי?', { mode: 'search' })];
+    expect(JSON.stringify(toProviderMessages(talk))).not.toContain('example.com');
+  });
+});
