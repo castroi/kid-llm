@@ -226,17 +226,24 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
   const models = list.state === 'ready' ? list.models : null;
   const parentUse = draft.parentUse === true;
 
+  /** The list's entry for a model name, in any letter case: a name typed by hand may differ in case only. */
+  const listed = (model: string): ModelInfo | undefined => models?.find((entry) => entry.id.toLowerCase() === model.toLowerCase());
   /**
    * Uncensored, by the provider's list when it knows the model; for a model the list doesn't
    * know (or with no list), by the mark saved when it was chosen. A name that says so always counts.
    */
   const uncensored = (model: string): boolean => {
     if (model === '') return false;
-    const known = models?.find((entry) => entry.id === model);
+    const known = listed(model);
     return looksUncensored(model) || (known ? known.uncensored : (draft.uncensored ?? []).includes(model));
   };
   /** Chosen for a child's phone, where it will not answer. */
   const blocked = (model: string | undefined): boolean => !parentUse && uncensored((model ?? '').trim());
+  /** Typed for a child's phone, and the loaded list doesn't know it: whether it is uncensored can't be checked. */
+  const unchecked = (model: string | undefined): boolean => {
+    const name = (model ?? '').trim();
+    return !parentUse && models !== null && name !== '' && !blocked(name) && listed(name) === undefined;
+  };
 
   const askForList = (typedKey: string) => {
     listRequest.current += 1;
@@ -435,6 +442,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
               models={models}
               parentUse={parentUse}
               blocked={blocked(draft.models[m.id])}
+              unchecked={unchecked(draft.models[m.id])}
             />
           ))}
           <ModelField
@@ -447,6 +455,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             models={models}
             parentUse={parentUse}
             blocked={blocked(draft.fileModel)}
+            unchecked={unchecked(draft.fileModel)}
           >
             <p className="hint">
               ריק = היא לא יכולה לצרף קבצים. עם שם מודל, במצבים "שיחה" ו"חשבון" היא יכולה לצרף להודעה תמונה, PDF או קובץ Word. הקובץ נשלח לספק עם ההודעה, ושוב עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קובץ אחר; כל שליחה כזאת עולה כסף. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב. צריך מודל שיודע לקרוא תמונות (vision).

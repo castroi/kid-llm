@@ -32,6 +32,8 @@ export interface ModelFieldProps {
   parentUse: boolean;
   /** The chosen model is uncensored while the app is set for a child: it will not answer her. */
   blocked: boolean;
+  /** Set for a child, and the provider's list doesn't know this name: it can't be checked for being uncensored. */
+  unchecked: boolean;
   children?: ReactNode;
 }
 
@@ -40,7 +42,7 @@ export interface ModelFieldProps {
  * list is loaded it can be picked from the list, narrowed by typing part of a name. Names
  * and tags come from the provider and are shown as plain text, left to right.
  */
-export function ModelField({ id, label, field, value, maxLength, onChange, models, parentUse, blocked, children }: ModelFieldProps) {
+export function ModelField({ id, label, field, value, maxLength, onChange, models, parentUse, blocked, unchecked, children }: ModelFieldProps) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState('');
   const chosen = models?.find((model) => model.id === value.trim());
@@ -73,6 +75,7 @@ export function ModelField({ id, label, field, value, maxLength, onChange, model
           מודל לא מצונזר: הוא עונה רק כשהתיבה "האפליקציה בשימוש של ילדה" לא מסומנת. כל עוד היא מסומנת, {field === 'files' ? 'היא לא יכולה לצרף קבצים' : 'המצב הזה לא זמין לה'}.
         </p>
       )}
+      {unchecked && <p className="hint warning">השם הזה לא מופיע ברשימת המודלים של הספק, ולכן אי אפשר לבדוק אם המודל לא מצונזר. כדאי לבחור מהרשימה.</p>}
       {models && (
         <>
           <button type="button" className="button" aria-expanded={open} aria-label={`${label}: בחירה מהרשימה`} onClick={() => setOpen((was) => !was)}>

@@ -676,6 +676,30 @@ describe('the model picker', () => {
     expect(phone.settings.uncensored).toEqual(['gone-model']);
   });
 
+  it('knows a listed uncensored model typed by hand in another letter case', async () => {
+    const { phone } = await openWithList();
+    await userEvent.type(screen.getByLabelText(CHAT), 'WILD-Model');
+    expect(screen.getByText(/מודל לא מצונזר: הוא עונה רק כשהתיבה/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.uncensored).toEqual(['WILD-Model']);
+  });
+
+  it("warns, for a child's phone, about a typed name the provider's list does not know", async () => {
+    await openWithList();
+    await userEvent.type(screen.getByLabelText(CHAT), 'not-on-the-list');
+    const warning = /השם הזה לא מופיע ברשימת המודלים של הספק, ולכן אי אפשר לבדוק אם המודל לא מצונזר/;
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    // A listed name, in any letter case, is checked: no warning.
+    await userEvent.clear(screen.getByLabelText(CHAT));
+    await userEvent.type(screen.getByLabelText(CHAT), 'LLAMA-3.3-70b');
+    expect(screen.queryByText(warning)).toBeNull();
+    // In a parent's own use there is nothing to protect.
+    await userEvent.clear(screen.getByLabelText(CHAT));
+    await userEvent.type(screen.getByLabelText(CHAT), 'not-on-the-list');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }));
+    expect(screen.queryByText(warning)).toBeNull();
+  });
+
   it("says why the list did not load, with the provider's own message, and still takes a typed name", async () => {
     const { phone } = await openSettings({ apiKey: KEY, listFails: new AiError('unauthorized', '401 key disabled') });
     expect(await screen.findByText(/רשימת המודלים לא נטענה: המפתח לא התקבל/)).toBeInTheDocument();
