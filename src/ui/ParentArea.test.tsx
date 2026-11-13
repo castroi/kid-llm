@@ -2,9 +2,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
+import type { ModelInfo } from '../ai/models';
 import { AiError } from '../ai/providers';
 import { appVersion } from '../core/version';
 import { fakeParent, type FakePhone } from '../test/fakeParent';
+import { MAX_SHOWN_MODELS } from './ModelField';
 import { IDLE_CLOSE_MS, ParentArea } from './ParentArea';
 
 const KEY = 'sk-parent-secret';
@@ -490,5 +492,236 @@ describe('the version line', () => {
   it('is not shown while a first code is being chosen either', () => {
     open();
     expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+});
+
+describe('the model picker', () => {
+  function model(id: string, extra: Partial<ModelInfo> = {}): ModelInfo {
+    return { id, name: id, kind: 'text', privacy: 'private', uncensored: false, tee: false, e2ee: false, webSearch: false, vision: false, price: null, ...extra };
+  }
+  const MODELS: ModelInfo[] = [
+    model('deepseek-v4-1-flash', { name: 'DeepSeek V4.1 Flash', privacy: 'anonymized', tee: true, e2ee: true, price: { min: 0.03, max: 1.25 } }),
+    model('llama-3.3-70b', { name: 'Llama 3.3 70B', webSearch: true, price: { min: 0.6, max: 0.6 } }),
+    model('qwen3-vl', { name: 'Qwen 3 VL', vision: true }),
+    model('wild-model', { name: 'Wild Model', uncensored: true, webSearch: true, vision: true }),
+    model('paint-model', { name: 'Paint Model', kind: 'image' }),
+  ];
+  const CHAT = 'מודל למצב "שיחה"';
+  const FILES = 'מודל לתמונות ולקבצים שהיא מצרפת';
+  const listButton = (label: string) => screen.getByRole('button', { name: `${label}: בחירה מהרשימה` });
+  const filterBox = (label: string) => screen.getByLabelText(`${label}: סינון לפי שם`);
+  const offered = () => Array.from(document.querySelectorAll('.model-option .model-id')).map((el) => el.textContent);
+  const loaded = (count: number) => screen.findByText(new RegExp(`נטענו ${count} מודלים מהספק`));
+
+  async function openWithList(initial: Partial<FakePhone> = {}) {
+    const opened = await openSettings({ apiKey: KEY, models: MODELS, ...initial });
+    await loaded((initial.models ?? MODELS).length);
+    return opened;
+  }
+
+  it("asks the provider for its models with the saved key as the settings open, and never before the code", async () => {
+    const { phone } = open({ pin: '2468', apiKey: KEY, models: MODELS });
+    expect(phone.listedWith).toEqual([]);
+    await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
+    await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
+    await loaded(5);
+    // '' = the saved key, which the screen never holds.
+    expect(new Set(phone.listedWith)).toEqual(new Set(['']));
+    expect(screen.getByText(/Private: הספק לא שומר דבר\. Anonymized: החברה של המודל רואה את הטקסט, אבל לא מי שלח אותו/)).toBeInTheDocument();
+    expect(screen.getByText(/האפליקציה שולחת בקשות רגילות ולא מצפינה מקצה לקצה/)).toBeInTheDocument();
+  });
+
+  it('asks for nothing without a key: the name is typed by hand, as before', async () => {
+    const { phone } = await openSettings({ models: MODELS });
+    expect(screen.getByText(/בלי הרשימה מקלידים את שם המודל/)).toBeInTheDocument();
+    expect(phone.listedWith).toEqual([]);
+    expect(screen.queryByRole('button', { name: `${CHAT}: בחירה מהרשימה` })).toBeNull();
+
+    await userEvent.click(screen.getByRole('button', { name: 'טעינת רשימת המודלים' }));
+    expect(screen.getByText(/רשימת המודלים לא נטענה: צריך להזין מפתח קודם\./)).toBeInTheDocument();
+    expect(phone.listedWith).toEqual([]);
+
+    await userEvent.type(screen.getByLabelText(CHAT), 'typed-model');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.models.chat).toBe('typed-model');
+  });
+
+  it('loads the list with a key that was typed but not saved yet', async () => {
+    const { phone } = await openSettings({ models: MODELS });
+    await userEvent.type(screen.getByLabelText('מפתח API'), 'sk-new');
+    await userEvent.click(screen.getByRole('button', { name: 'טעינת רשימת המודלים' }));
+    await loaded(5);
+    expect(phone.listedWith).toEqual(['sk-new']);
+    expect(phone.apiKey).toBe('');
+  });
+
+  it('narrows the list as a name is typed, and puts the picked model in the field', async () => {
+    const { phone } = await openWithList();
+    expect(listButton(CHAT)).toHaveAttribute('aria-expanded', 'false');
+    await userEvent.click(listButton(CHAT));
+    expect(listButton(CHAT)).toHaveAttribute('aria-expanded', 'true');
+    expect(offered()).toEqual(['deepseek-v4-1-flash', 'llama-3.3-70b', 'qwen3-vl']);
+
+    await userEvent.type(filterBox(CHAT), 'deep FLASH');
+    expect(offered()).toEqual(['deepseek-v4-1-flash']);
+    await userEvent.click(screen.getByRole('button', { name: /deepseek-v4-1-flash/ }));
+
+    expect(screen.getByLabelText(CHAT)).toHaveValue('deepseek-v4-1-flash');
+    // The list closes; the chosen model stays described under the field.
+    expect(offered()).toEqual([]);
+    expect(screen.getByText('DeepSeek V4.1 Flash')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.models.chat).toBe('deepseek-v4-1-flash');
+    expect(phone.settings.uncensored).toBeUndefined();
+  });
+
+  it("shows each model's tags and its price for a million tokens, left to right", async () => {
+    await openWithList();
+    await userEvent.click(listButton(CHAT));
+    const deep = screen.getByRole('button', { name: /deepseek-v4-1-flash/ });
+    expect(deep).toHaveAttribute('dir', 'ltr');
+    expect(deep).toHaveTextContent('Anonymized');
+    expect(deep).toHaveTextContent('TEE');
+    expect(deep).toHaveTextContent('E2EE');
+    expect(deep).toHaveTextContent('USD 0.03-1.25 / 1M');
+    expect(deep).not.toHaveTextContent('Private');
+    const llama = screen.getByRole('button', { name: /llama-3\.3-70b/ });
+    expect(llama).toHaveTextContent('Private');
+    expect(llama).toHaveTextContent('USD 0.60 / 1M');
+    expect(llama).not.toHaveTextContent('TEE');
+    // No price from the provider: none is made up.
+    expect(screen.getByRole('button', { name: /qwen3-vl/ })).not.toHaveTextContent('USD');
+  });
+
+  it('offers each field only the models that fit it', async () => {
+    await openWithList();
+    await userEvent.click(listButton('מודל למצב "חיפוש"'));
+    expect(offered()).toEqual(['llama-3.3-70b']);
+    await userEvent.click(listButton('מודל למצב "חיפוש"'));
+    await userEvent.click(listButton('מודל למצב "ציור"'));
+    expect(offered()).toEqual(['paint-model']);
+    await userEvent.click(listButton('מודל למצב "ציור"'));
+    await userEvent.click(listButton(FILES));
+    expect(offered()).toEqual(['qwen3-vl']);
+    await userEvent.click(screen.getByRole('button', { name: /qwen3-vl/ }));
+    expect(screen.getByLabelText(FILES)).toHaveValue('qwen3-vl');
+  });
+
+  it('says so when nothing fits what was typed', async () => {
+    await openWithList();
+    await userEvent.click(listButton(CHAT));
+    await userEvent.type(filterBox(CHAT), 'no-such-model');
+    expect(offered()).toEqual([]);
+    expect(screen.getByText('אין מודל מתאים.')).toBeInTheDocument();
+  });
+
+  it('shows a long list a part at a time', async () => {
+    const many = Array.from({ length: MAX_SHOWN_MODELS + 5 }, (_, n) => model(`model-${n}`));
+    await openWithList({ models: many });
+    await userEvent.click(listButton(CHAT));
+    expect(offered()).toHaveLength(MAX_SHOWN_MODELS);
+    expect(screen.getByText(`מוצגים ${MAX_SHOWN_MODELS} מתוך ${MAX_SHOWN_MODELS + 5}. הקלדה מצמצמת את הרשימה.`)).toBeInTheDocument();
+  });
+
+  it("offers uncensored models only in a parent's own use, and saves that the chosen one is uncensored", async () => {
+    const { phone } = await openWithList();
+    await userEvent.click(listButton(CHAT));
+    expect(offered()).not.toContain('wild-model');
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }));
+    expect(offered()).toContain('wild-model');
+    const wild = screen.getByRole('button', { name: /wild-model/ });
+    expect(wild).toHaveTextContent('Uncensored');
+    await userEvent.click(wild);
+    expect(screen.queryByText(/מודל לא מצונזר: הוא עונה רק כשהתיבה/)).toBeNull();
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+
+    expect(screen.getByText('נשמר.')).toBeInTheDocument();
+    expect(phone.settings).toMatchObject({ parentUse: true, uncensored: ['wild-model'] });
+    expect(phone.settings.models.chat).toBe('wild-model');
+  });
+
+  it('warns that an uncensored model will not answer once the phone is set for a child again', async () => {
+    const { phone } = await openWithList({
+      settings: { provider: 'venice', models: { chat: 'wild-model', search: '', math: 'llama-3.3-70b', draw: '' }, fileModel: 'wild-model', systemPrompt: '', childName: '', dailyLimit: null, parentUse: true, uncensored: ['wild-model'] },
+    });
+    expect(screen.queryByText(/מודל לא מצונזר: הוא עונה רק כשהתיבה/)).toBeNull();
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }));
+    const warnings = screen.getAllByText(/מודל לא מצונזר: הוא עונה רק כשהתיבה "האפליקציה בשימוש של ילדה" לא מסומנת/);
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toHaveTextContent('המצב הזה לא זמין לה');
+    expect(warnings[1]).toHaveTextContent('היא לא יכולה לצרף קבצים');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+
+    expect(screen.getByText('נשמר. מודל לא מצונזר לא עונה כשהאפליקציה בשימוש של ילדה.')).toBeInTheDocument();
+    expect(phone.settings.parentUse).toBeUndefined();
+    // The mark is kept, once: it is what stops the model from answering her.
+    expect(phone.settings.uncensored).toEqual(['wild-model']);
+  });
+
+  it('knows a hand-typed uncensored model by its name, with no list at all', async () => {
+    const { phone } = await openSettings();
+    await userEvent.type(screen.getByLabelText(CHAT), 'venice-uncensored');
+    expect(screen.getByText(/מודל לא מצונזר: הוא עונה רק כשהתיבה/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.uncensored).toEqual(['venice-uncensored']);
+  });
+
+  it("keeps a saved mark for a model the list does not know, and drops it when the list says the model is ordinary", async () => {
+    const saved = { provider: 'venice' as const, models: { chat: 'gone-model', search: '', math: 'llama-3.3-70b', draw: '' }, systemPrompt: '', childName: '', dailyLimit: null, uncensored: ['gone-model', 'llama-3.3-70b'] };
+    const { phone } = await openWithList({ settings: saved });
+    expect(screen.getAllByText(/מודל לא מצונזר: הוא עונה רק כשהתיבה/)).toHaveLength(1);
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.uncensored).toEqual(['gone-model']);
+  });
+
+  it('knows a listed uncensored model typed by hand in another letter case', async () => {
+    const { phone } = await openWithList();
+    await userEvent.type(screen.getByLabelText(CHAT), 'WILD-Model');
+    expect(screen.getByText(/מודל לא מצונזר: הוא עונה רק כשהתיבה/)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.uncensored).toEqual(['WILD-Model']);
+  });
+
+  it("warns, for a child's phone, about a typed name the provider's list does not know", async () => {
+    await openWithList();
+    await userEvent.type(screen.getByLabelText(CHAT), 'not-on-the-list');
+    const warning = /השם הזה לא מופיע ברשימת המודלים של הספק, ולכן אי אפשר לבדוק אם המודל לא מצונזר/;
+    expect(screen.getByText(warning)).toBeInTheDocument();
+    // A listed name, in any letter case, is checked: no warning.
+    await userEvent.clear(screen.getByLabelText(CHAT));
+    await userEvent.type(screen.getByLabelText(CHAT), 'LLAMA-3.3-70b');
+    expect(screen.queryByText(warning)).toBeNull();
+    // In a parent's own use there is nothing to protect.
+    await userEvent.clear(screen.getByLabelText(CHAT));
+    await userEvent.type(screen.getByLabelText(CHAT), 'not-on-the-list');
+    await userEvent.click(screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }));
+    expect(screen.queryByText(warning)).toBeNull();
+  });
+
+  it("says why the list did not load, with the provider's own message, and still takes a typed name", async () => {
+    const { phone } = await openSettings({ apiKey: KEY, listFails: new AiError('unauthorized', '401 key disabled') });
+    expect(await screen.findByText(/רשימת המודלים לא נטענה: המפתח לא התקבל/)).toBeInTheDocument();
+    expect(screen.getByText('401 key disabled')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: `${CHAT}: בחירה מהרשימה` })).toBeNull();
+    // Shown on the screen only.
+    expect(JSON.stringify(phone.settings)).not.toContain('401');
+
+    await userEvent.type(screen.getByLabelText(CHAT), 'typed-model');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.models.chat).toBe('typed-model');
+
+    // The provider is back: the same button loads the list.
+    phone.listFails = null;
+    phone.models = MODELS;
+    await userEvent.click(screen.getByRole('button', { name: 'טעינת רשימת המודלים' }));
+    await loaded(5);
+    expect(listButton(CHAT)).toBeInTheDocument();
+  });
+
+  it('survives a list that fails in an unexpected way', async () => {
+    await openSettings({ apiKey: KEY, listFails: new Error('boom') });
+    expect(await screen.findByText(/רשימת המודלים לא נטענה: התקבלה תשובה לא צפויה מהספק\./)).toBeInTheDocument();
   });
 });

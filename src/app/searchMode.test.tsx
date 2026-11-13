@@ -8,12 +8,12 @@ import { fakeParent } from '../test/fakeParent';
 import { App } from './App';
 import type { Services } from './useChat';
 
-function openApp(models: { chat: string; search: string; math: string; draw: string }, sources?: Source[], parentUse?: true) {
+function openApp(models: { chat: string; search: string; math: string; draw: string }, sources?: Source[], parentUse?: true, uncensored?: string[]) {
   const requests: ChatRequest[] = [];
   let id = 0;
   const services: Services = {
     store: null,
-    loadSettings: () => ({ provider: 'venice', models, systemPrompt: '', childName: '', dailyLimit: null, ...(parentUse ? { parentUse } : {}) }),
+    loadSettings: () => ({ provider: 'venice', models, systemPrompt: '', childName: '', dailyLimit: null, ...(parentUse ? { parentUse } : {}), ...(uncensored ? { uncensored } : {}) }),
     loadApiKey: () => 'sk-test',
     sendChat: async (request) => {
       requests.push(request);
@@ -81,6 +81,28 @@ describe('search mode', () => {
     await userEvent.type(screen.getByLabelText('הודעה'), 'מה מזג האוויר?');
     expect(screen.getByRole('button', { name: 'שליחה' })).toBeDisabled();
     expect(requests).toHaveLength(0);
+  });
+
+  it('never lets an uncensored model answer a child: its mode is not ready, and no call is made', async () => {
+    const requests = openApp({ chat: 'wild-model', search: 'search-uncensored', math: 'math-model', draw: '' }, undefined, undefined, ['wild-model']);
+    // Marked by the provider's list when the parent chose it.
+    expect(screen.getByText(SETUP_MESSAGE)).toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('הודעה'), 'שלום');
+    expect(screen.getByRole('button', { name: 'שליחה' })).toBeDisabled();
+    // Known by its name alone.
+    await pick(/חיפוש/);
+    expect(screen.getByRole('button', { name: 'שליחה' })).toBeDisabled();
+    expect(requests).toHaveLength(0);
+    // Her other modes work as before.
+    await pick(/חשבון/);
+    await say('כמה זה 2 + 2?');
+    expect(requests.map((r) => r.model)).toEqual(['math-model']);
+  });
+
+  it("lets an uncensored model answer in a parent's own use", async () => {
+    const requests = openApp({ chat: 'wild-model', search: '', math: 'math-model', draw: '' }, undefined, true, ['wild-model']);
+    await say('hello');
+    expect(requests[0]).toMatchObject({ model: 'wild-model', kidUse: false });
   });
 
   it('does not search in maths mode', async () => {

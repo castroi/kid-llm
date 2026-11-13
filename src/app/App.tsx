@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { canAttachIn } from '../core/attachment';
 import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
-import { missingFor } from '../storage/settings';
+import { fileModelFor, missingFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
 import { Conversation } from '../ui/Conversation';
 import { HistoryDrawer } from '../ui/HistoryDrawer';
@@ -19,7 +19,7 @@ function readSetup(services: Services) {
   const apiKey = services.loadApiKey(settings.provider);
   const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
   // She can attach a file only once the parent chose a model for files.
-  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && Boolean(settings.fileModel), parentUse: settings.parentUse === true };
+  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && fileModelFor(settings) !== '', parentUse: settings.parentUse === true };
 }
 
 export function App({ services, parent }: { services: Services; parent: ParentServices }) {

@@ -8,7 +8,10 @@ import {
   MAX_MODEL_CHARS,
   MAX_NAME_CHARS,
   MAX_SYSTEM_PROMPT_CHARS,
+  fileModelFor,
+  isUncensored,
   missingFor,
+  modelFor,
   sanitizeSettings,
   saveApiKey,
   saveSettings,
@@ -192,3 +195,53 @@ describe('the model for files', () => {
   });
 });
 
+
+describe('uncensored models', () => {
+  const MARKED: Settings = { ...SET_UP, models: { ...SET_UP.models, chat: 'wild-model' }, fileModel: 'wild-reader', uncensored: ['wild-model', 'wild-reader'] };
+
+  it('knows one by the mark saved with it, or by a name that says so', () => {
+    expect(isUncensored('wild-model', MARKED)).toBe(true);
+    expect(isUncensored('model-b', MARKED)).toBe(false);
+    expect(isUncensored('venice-uncensored', SET_UP)).toBe(true);
+    expect(isUncensored('some-abliterated-model', SET_UP)).toBe(true);
+    expect(isUncensored('', MARKED)).toBe(false);
+  });
+
+  it('never gives one to a call while the app is used by a child: its mode counts as not set up', () => {
+    expect(modelFor('chat', MARKED)).toBe('');
+    expect(missingFor('chat', MARKED, 'sk-secret')).toBe('model');
+    expect(fileModelFor(MARKED)).toBe('');
+    // The other modes are untouched.
+    expect(modelFor('search', MARKED)).toBe('model-b');
+    expect(missingFor('search', MARKED, 'sk-secret')).toBeNull();
+
+    const named: Settings = { ...SET_UP, models: { ...SET_UP.models, draw: 'paint-uncensored' }, fileModel: 'reader-abliterated' };
+    expect(modelFor('draw', named)).toBe('');
+    expect(missingFor('draw', named, 'sk-secret')).toBe('model');
+    expect(fileModelFor(named)).toBe('');
+  });
+
+  it("gives it in a parent's own use only", () => {
+    const parent: Settings = { ...MARKED, parentUse: true };
+    expect(modelFor('chat', parent)).toBe('wild-model');
+    expect(missingFor('chat', parent, 'sk-secret')).toBeNull();
+    expect(fileModelFor(parent)).toBe('wild-reader');
+  });
+
+  it('gives an ordinary model either way, and no model for files when none is named', () => {
+    expect(modelFor('chat', SET_UP)).toBe('model-a');
+    expect(modelFor('chat', { ...SET_UP, parentUse: true })).toBe('model-a');
+    expect(fileModelFor(SET_UP)).toBe('');
+    expect(fileModelFor({ ...SET_UP, fileModel: 'reader' })).toBe('reader');
+  });
+
+  it('keeps the marks through saving, only for models that are chosen, each once', () => {
+    const storage = memory();
+    saveSettings({ ...MARKED, uncensored: ['wild-model', ' wild-model ', 'not-chosen', 'wild-reader'] }, storage);
+    expect(loadSettings(storage).uncensored).toEqual(['wild-model', 'wild-reader']);
+    expect(sanitizeSettings({ ...SET_UP, uncensored: ['not-chosen'] })).not.toHaveProperty('uncensored');
+    expect(sanitizeSettings({ ...SET_UP, uncensored: 'model-a' })).not.toHaveProperty('uncensored');
+    expect(sanitizeSettings({ ...SET_UP, uncensored: [7, null, {}] })).not.toHaveProperty('uncensored');
+    expect(sanitizeSettings(SET_UP)).not.toHaveProperty('uncensored');
+  });
+});
