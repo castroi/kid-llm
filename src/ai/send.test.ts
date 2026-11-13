@@ -2,9 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, SEARCH_BASELINE, SEARCH_BASELINE_PARENT, systemPromptFor } from './baseline';
 import { AI_PROVIDERS } from './catalog';
-import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
+import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, MAX_MODELS_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
 import { MAX_LINE_CHARS } from './sse';
-import { checkConnection, sendChat, type ChatRequest } from './send';
+import { checkConnection, listModels, sendChat, type ChatRequest } from './send';
 
 const KEY = 'sk-test-secret';
 const encoder = new TextEncoder();
@@ -644,5 +644,94 @@ describe('checkConnection', () => {
     const err = await reasonOf(checkConnection('venice', KEY, { fetch }));
     expect(err.reason).toBe('no-credit');
     expect(err.detail).toBe('402 Insufficient balance');
+  });
+});
+
+describe('listModels', () => {
+  /** Venice's two lists: text models and image models, each asked for on its own. */
+  function fetchLists(text: unknown, image: unknown = { data: [] }): { fetch: FetchLike; calls: Recorded[] } {
+    const calls: Recorded[] = [];
+    return {
+      calls,
+      fetch: (url, init) => {
+        calls.push({ url, init });
+        const body = url.endsWith('type=image') ? image : text;
+        return Promise.resolve(new Response(typeof body === 'string' ? body : JSON.stringify(body), { status: 200 }));
+      },
+    };
+  }
+  const TEXT = { data: [{ id: 'chat-model', type: 'text', model_spec: { name: 'Chat Model', privacy: 'private', pricing: { input: { usd: 0.5 }, output: { usd: 2 }, cache_input: { usd: 0.1 } } } }] };
+  const IMAGE = { data: [{ id: 'paint-model', type: 'image', model_spec: { name: 'Paint Model', privacy: 'private' } }] };
+
+  it('asks the models endpoint for text and for image models, with the key and nothing else', async () => {
+    const { fetch, calls } = fetchLists(TEXT, IMAGE);
+    const models = await listModels('venice', ` ${KEY} `, { fetch });
+    expect(models.map((m) => [m.id, m.kind])).toEqual([
+      ['chat-model', 'text'],
+      ['paint-model', 'image'],
+    ]);
+    expect(models[0]).toMatchObject({ name: 'Chat Model', privacy: 'private', price: { min: 0.1, max: 2 } });
+    expect(calls.map((c) => c.url).sort()).toEqual([`${AI_PROVIDERS.venice.endpoints.models}?type=image`, `${AI_PROVIDERS.venice.endpoints.models}?type=text`]);
+    for (const { init } of calls) {
+      expect(init.method).toBe('GET');
+      expect(init.headers).toEqual({ Authorization: `Bearer ${KEY}` });
+      expect(init.body).toBeUndefined();
+      expect(init).toMatchObject(SAFE_FETCH);
+    }
+  });
+
+  it('makes no call without a key', async () => {
+    const { fetch, calls } = fetchLists(TEXT);
+    expect((await reasonOf(listModels('venice', '  ', { fetch }))).reason).toBe('unauthorized');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('says why the list did not come, without the key in the message', async () => {
+    const refused = fetchJson(401, { error: `key ${KEY} is not valid` });
+    const err = await reasonOf(listModels('venice', KEY, { fetch: refused.fetch }));
+    expect(err.reason).toBe('unauthorized');
+    expect(err.detail).toBe('401 key •••• is not valid');
+  });
+
+  it('gives up on a list it cannot read or that is far too long', async () => {
+    const unreadable = fetchLists('<html>not a list</html>');
+    const err = await reasonOf(listModels('venice', KEY, { fetch: unreadable.fetch }));
+    expect(err.reason).toBe('bad-response');
+    expect(err.detail).toBe('models list unreadable');
+
+    const huge = fetchLists(`{"data":[],"pad":"${'x'.repeat(MAX_MODELS_BODY_CHARS)}"}`);
+    const tooLong = await reasonOf(listModels('venice', KEY, { fetch: huge.fetch }));
+    expect(tooLong.reason).toBe('bad-response');
+    expect(tooLong.detail).toBe('models list too long');
+  });
+
+  it('treats an answer with no body as unreadable', async () => {
+    const fetch: FetchLike = () => Promise.resolve(new Response(null, { status: 200 }));
+    expect((await reasonOf(listModels('venice', KEY, { fetch }))).reason).toBe('bad-response');
+  });
+
+  it('says there is no connection when the provider cannot be reached or the answer breaks off', async () => {
+    const offline: FetchLike = () => Promise.reject(new TypeError('Load failed'));
+    expect((await reasonOf(listModels('venice', KEY, { fetch: offline }))).reason).toBe('network');
+
+    const broken: FetchLike = (_url, init) => Promise.resolve(streamed(['{"data":['], init.signal, { drop: true }));
+    const err = await reasonOf(listModels('venice', KEY, { fetch: broken }));
+    expect(err.reason).toBe('network');
+    expect(err.detail).toBe('TypeError');
+  });
+
+  it('stops waiting after the timeout', async () => {
+    const hanging: FetchLike = (_url, init) => Promise.resolve(streamed(['{"data":['], init.signal, { hang: true }));
+    expect((await reasonOf(listModels('venice', KEY, { fetch: hanging, timeoutMs: 20 }))).reason).toBe('timeout');
+  });
+
+  it("uses the browser's own fetch when none is given", async () => {
+    vi.stubGlobal('fetch', () => Promise.resolve(new Response(JSON.stringify(TEXT), { status: 200 })));
+    try {
+      // Both lists hold the same text model here; as the image list it is left out.
+      expect((await listModels('venice', KEY)).map((m) => m.id)).toEqual(['chat-model']);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

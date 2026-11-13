@@ -690,6 +690,79 @@ textarea.input {
   color: var(--danger);
 }
 
+/* The model picker of the parent's settings. Names, tags and prices are the provider's, left to right. */
+.model-chosen,
+.model-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.model-chosen {
+  margin: 0;
+  font-size: 15px;
+}
+
+.model-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.model-id,
+.model-price {
+  font-size: 15px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.tag {
+  padding: 2px 8px;
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-tint);
+  border-radius: 999px;
+}
+
+.tag.alert {
+  color: var(--danger);
+  background: var(--surface);
+  border-color: var(--danger);
+}
+
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 50vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.model-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 12px;
+  font-size: 16px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
 /* A tick box with its label: the whole row is the touch target. */
 .field label.check {
   display: flex;

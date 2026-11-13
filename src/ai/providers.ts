@@ -1,5 +1,6 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
 import { dataUrl, SENT_FILE_NAMES, type ChatFile } from './files';
+import { sanitizeModels, type ModelInfo, type ModelKind } from './models';
 import { sanitizeSources, type Source } from './sources';
 import { LineTooLongError, sseData } from './sse';
 
@@ -11,6 +12,7 @@ import { LineTooLongError, sseData } from './sse';
  * Docs: Venice https://docs.venice.ai/api-reference/endpoint/chat/completions
  *       and https://docs.venice.ai/api-reference/endpoint/image/generate
  *       Files in a chat: https://docs.venice.ai/guides/features/vision and .../guides/features/file-inputs
+ *       The list of models: https://docs.venice.ai/api-reference/endpoint/models/list
  */
 
 /** Why a call failed. The kid sees one friendly line; the parent area shows the reason. */
@@ -104,6 +106,8 @@ export interface ProviderAdapter {
   generateImage(call: ImageCall): Promise<GeneratedImage>;
   /** Resolves when the key works; the text, if any, is shown to the parent. */
   checkKey(call: { apiKey: string; signal: AbortSignal; fetch: FetchLike }): Promise<string | null>;
+  /** The provider's models for the parent area's picker: text models first, then image models. Carries the key only. */
+  listModels(call: { apiKey: string; signal: AbortSignal; fetch: FetchLike }): Promise<ModelInfo[]>;
 }
 
 /** Far above any real answer; stops a runaway stream from filling the phone's memory. */
@@ -135,6 +139,9 @@ function errorMessage(error: unknown): string {
 
 /** An error answer is a short JSON; more than this isn't downloaded. */
 export const MAX_ERROR_BODY_CHARS = 16 * 1024;
+
+/** A list of a few hundred models with their descriptions is well under this; more isn't downloaded. */
+export const MAX_MODELS_BODY_CHARS = 4 * 1024 * 1024;
 
 /** Reads at most `max` characters of a response and drops the rest. */
 async function readLimitedText(response: Response, max: number): Promise<string> {
@@ -352,6 +359,31 @@ const venice: ProviderAdapter = {
     if (!response.ok) throw await failure(response, apiKey);
     return null;
   },
+  async listModels(request) {
+    const [text, image] = await Promise.all([veniceModels('text', request), veniceModels('image', request)]);
+    return [...text, ...image];
+  },
 };
+
+/** One kind of Venice's models ("text" or "image"), read with a size limit and cleaned (src/ai/models.ts). */
+async function veniceModels(kind: ModelKind, { apiKey, signal, fetch }: { apiKey: string; signal: AbortSignal; fetch: FetchLike }): Promise<ModelInfo[]> {
+  const response = await call(fetch, `${AI_PROVIDERS.venice.endpoints.models}?type=${kind}`, { method: 'GET', headers: headers(apiKey, false), signal });
+  if (!response.ok) throw await failure(response, apiKey);
+  let text: string;
+  try {
+    text = await readLimitedText(response, MAX_MODELS_BODY_CHARS);
+  } catch (err) {
+    if (signal.aborted) throw err; // send.ts tells a timeout from a stop
+    throw new AiError('network', errorName(err));
+  }
+  if (text.length > MAX_MODELS_BODY_CHARS) throw new AiError('bad-response', 'models list too long');
+  let list: unknown;
+  try {
+    list = JSON.parse(text);
+  } catch {
+    throw new AiError('bad-response', 'models list unreadable');
+  }
+  return sanitizeModels(list, kind);
+}
 
 export const ADAPTERS: Record<AiProviderId, ProviderAdapter> = { venice };

@@ -9,7 +9,7 @@ import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage,
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
-import { missingFor, type Settings } from '../storage/settings';
+import { fileModelFor, missingFor, modelFor, type Settings } from '../storage/settings';
 
 /** Everything the chat needs from outside, so tests can stand in for the phone and the provider. */
 export interface Services {
@@ -177,7 +177,7 @@ export function useChat(services: Services): ChatController {
       const talk = forMode === 'draw' ? [] : toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages);
       // A call that carries a file goes to the model the parent chose for files. With none
       // chosen (the parent took it away since), the file stays on the phone and only the text goes.
-      const fileModel = canAttachIn(forMode) ? (settings.fileModel ?? '') : '';
+      const fileModel = canAttachIn(forMode) ? fileModelFor(settings) : '';
       const withFile = fileModel !== '' && talk.some((m) => m.file !== undefined);
 
       const controller = new AbortController();
@@ -203,7 +203,7 @@ export function useChat(services: Services): ChatController {
           // A picture is made from her last message alone; nothing else of the chat is sent.
           image = await services.generateImage({
             provider: settings.provider,
-            model: settings.models.draw,
+            model: modelFor('draw', settings),
             prompt: base.messages[base.messages.length - 1].text,
             apiKey,
             signal: controller.signal,
@@ -213,7 +213,7 @@ export function useChat(services: Services): ChatController {
         } else {
           const result = await services.sendChat({
             provider: settings.provider,
-            model: withFile ? fileModel : settings.models[forMode],
+            model: withFile ? fileModel : modelFor(forMode, settings),
             systemPrompt: settings.systemPrompt,
             messages: withFile ? talk : talk.map(({ role, content }) => ({ role, content })),
             apiKey,
@@ -321,7 +321,7 @@ export function useChat(services: Services): ChatController {
       const apiKey = services.loadApiKey(settings.provider);
       if (missingFor(mode, settings, apiKey)) return false;
       // A file goes only in the modes that take one, and only when the parent chose a model for files.
-      if (attachment && (!canAttachIn(mode) || !settings.fileModel)) return false;
+      if (attachment && (!canAttachIn(mode) || !fileModelFor(settings))) return false;
 
       if (overLimit(settings)) return false;
       const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode, ...(attachment ? { attachment } : {}) });

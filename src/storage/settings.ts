@@ -1,4 +1,5 @@
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
+import { looksUncensored } from '../ai/models';
 import { MODES, type ModeId } from '../core/modes';
 import { cut } from '../core/text';
 
@@ -30,6 +31,12 @@ export interface Settings {
    * Absent = the app is used by a child, which is the default and what anything unreadable means.
    */
   parentUse?: true;
+  /**
+   * Which of the chosen models the provider's list marks as uncensored. Such a model answers
+   * only in a parent's own use: for a child its mode counts as not set up (`modelFor`).
+   * Absent = none. Written by the parent area from the provider's list.
+   */
+  uncensored?: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -63,6 +70,10 @@ export function sanitizeSettings(raw: unknown): Settings {
   for (const mode of MODES) models[mode.id] = text(rawModels[mode.id], MAX_MODEL_CHARS).trim();
   const limit = value.dailyLimit;
   const fileModel = text(value.fileModel, MAX_MODEL_CHARS).trim();
+  // Only marks for models that are chosen are kept, each once.
+  const chosen = new Set([...Object.values(models), fileModel].filter((model) => model !== ''));
+  const marked = Array.isArray(value.uncensored) ? value.uncensored.map((model) => text(model, MAX_MODEL_CHARS).trim()) : [];
+  const uncensored = [...chosen].filter((model) => marked.includes(model));
   return {
     provider: typeof value.provider === 'string' && Object.hasOwn(AI_PROVIDERS, value.provider) ? (value.provider as AiProviderId) : DEFAULT_SETTINGS.provider,
     models,
@@ -72,6 +83,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     dailyLimit: typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 ? Math.min(limit, MAX_DAILY_LIMIT) : null,
     // Only the exact value a parent's untick saves; anything else is a child's phone.
     ...(value.parentUse === true ? { parentUse: true as const } : {}),
+    ...(uncensored.length > 0 ? { uncensored } : {}),
   };
 }
 
@@ -116,10 +128,37 @@ export function saveApiKey(provider: AiProviderId, apiKey: string, storage: KeyV
   }
 }
 
+/**
+ * An uncensored model: the provider's list marked it so when the parent chose it, or its
+ * name says so (a name typed by hand has no mark).
+ */
+export function isUncensored(model: string, settings: Settings): boolean {
+  return model !== '' && (looksUncensored(model) || (settings.uncensored ?? []).includes(model));
+}
+
+/** A model as it may be called now: an uncensored one only in a parent's own use, otherwise none. */
+function allowed(model: string, settings: Settings): string {
+  return settings.parentUse !== true && isUncensored(model, settings) ? '' : model;
+}
+
+/**
+ * The model to call for a mode; empty when none is set, and also when the one that is set is
+ * uncensored and the app is used by a child. Every call takes its model from here or from
+ * `fileModelFor`, so an uncensored model can't answer her.
+ */
+export function modelFor(mode: ModeId, settings: Settings): string {
+  return allowed(settings.models[mode], settings);
+}
+
+/** The model her attached files go to, under the same rule as `modelFor`; empty = no attaching. */
+export function fileModelFor(settings: Settings): string {
+  return allowed(settings.fileModel ?? '', settings);
+}
+
 /** Why she can't chat in a mode yet, for the "ask a parent" screen; null when it is ready. */
 export function missingFor(mode: ModeId, settings: Settings, apiKey: string): 'key' | 'model' | null {
   if (!apiKey) return 'key';
-  if (!settings.models[mode]) return 'model';
+  if (!modelFor(mode, settings)) return 'model';
   return null;
 }
 

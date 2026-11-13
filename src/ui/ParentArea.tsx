@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
+import { looksUncensored, type ModelInfo } from '../ai/models';
 import { AiError } from '../ai/providers';
 import type { ParentServices } from '../app/parentServices';
 import { isReady, MODES } from '../core/modes';
 import { parentMessage, waitText } from '../core/parentMessages';
 import type { AppVersion } from '../core/version';
 import { PIN_PATTERN, type PinResult } from '../storage/pin';
+import { ModelField } from './ModelField';
 import { MAX_DAILY_LIMIT, MAX_MODEL_CHARS, MAX_NAME_CHARS, MAX_SYSTEM_PROMPT_CHARS, type Settings } from '../storage/settings';
 
 export interface ParentAreaProps {
@@ -192,6 +194,15 @@ function EnterCode({ parent, onRight }: { parent: ParentServices; onRight: () =>
   );
 }
 
+/** The provider's list of models: not asked for yet, on its way, here, or not loaded (with the reason, for this screen only). */
+type ModelList = { state: 'idle' } | { state: 'loading' } | { state: 'ready'; models: ModelInfo[] } | { state: 'failed'; text: string; detail: string };
+
+/** Why the list was not loaded. The provider's own message is shown on this screen only; it is never saved anywhere. */
+function listFailure(err: unknown): ModelList {
+  const failed = err instanceof AiError ? err : new AiError('bad-response');
+  return { state: 'failed', text: parentMessage(failed.reason), detail: failed.detail };
+}
+
 type Check = { state: 'idle' } | { state: 'checking' } | { state: 'ok'; note: string | null } | { state: 'failed'; text: string; detail: string };
 
 function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServices; onChatsDeleted: () => void; onLocked: () => void }) {
@@ -206,8 +217,59 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
   const [dataStatus, setDataStatus] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [changingCode, setChangingCode] = useState(false);
+  // With a saved key the list is asked for as the settings open; without one there is nothing to ask with.
+  const [list, setList] = useState<ModelList>(() => (parent.hasApiKey(draft.provider) ? { state: 'loading' } : { state: 'idle' }));
+  // Only the newest request's answer is shown.
+  const listRequest = useRef(0);
 
   const provider: AiProviderId = draft.provider;
+  const models = list.state === 'ready' ? list.models : null;
+  const parentUse = draft.parentUse === true;
+
+  /**
+   * Uncensored, by the provider's list when it knows the model; for a model the list doesn't
+   * know (or with no list), by the mark saved when it was chosen. A name that says so always counts.
+   */
+  const uncensored = (model: string): boolean => {
+    if (model === '') return false;
+    const known = models?.find((entry) => entry.id === model);
+    return looksUncensored(model) || (known ? known.uncensored : (draft.uncensored ?? []).includes(model));
+  };
+  /** Chosen for a child's phone, where it will not answer. */
+  const blocked = (model: string | undefined): boolean => !parentUse && uncensored((model ?? '').trim());
+
+  const askForList = (typedKey: string) => {
+    listRequest.current += 1;
+    const mine = listRequest.current;
+    parent.listModels(provider, typedKey).then(
+      (found) => {
+        if (mine === listRequest.current) setList({ state: 'ready', models: found });
+      },
+      (err: unknown) => {
+        if (mine === listRequest.current) setList(listFailure(err));
+      },
+    );
+  };
+  // As the settings open: with the saved key. The screen never holds that key.
+  useEffect(() => {
+    if (!parent.hasApiKey(provider)) return;
+    listRequest.current += 1;
+    const mine = listRequest.current;
+    parent.listModels(provider, '').then(
+      (found) => {
+        if (mine === listRequest.current) setList({ state: 'ready', models: found });
+      },
+      (err: unknown) => {
+        if (mine === listRequest.current) setList(listFailure(err));
+      },
+    );
+  }, [parent, provider]);
+
+  const loadList = () => {
+    if (!keyText.trim() && !keySaved) return setList({ state: 'failed', text: 'צריך להזין מפתח קודם.', detail: '' });
+    setList({ state: 'loading' });
+    askForList(keyText);
+  };
   const change = (patch: Partial<Settings>) => {
     setDraft((current) => ({ ...current, ...patch }));
     setSaveStatus('');
@@ -232,11 +294,15 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
     if (limit !== null && (!Number.isInteger(limit) || limit < 1 || limit > MAX_DAILY_LIMIT)) {
       return setSaveStatus(`מספר ההודעות ביום צריך להיות בין 1 ל-${MAX_DAILY_LIMIT}, או ריק ללא הגבלה.`);
     }
-    const savedSettings = parent.saveSettings({ ...draft, dailyLimit: limit });
+    // Which chosen models are uncensored is saved with them: the chat screen has no list to ask.
+    const chosen = [...Object.values(draft.models), draft.fileModel ?? ''].map((model) => model.trim());
+    const marks = [...new Set(chosen.filter(uncensored))];
+    const savedSettings = parent.saveSettings({ ...draft, dailyLimit: limit, uncensored: marks.length > 0 ? marks : undefined });
     const savedKey = keyText.trim() ? parent.saveApiKey(provider, keyText) : true;
     if (savedKey) setKeyText('');
     setKeySaved(parent.hasApiKey(provider));
-    setSaveStatus(savedSettings && savedKey ? 'נשמר.' : 'לא נשמר. ייתכן שהאחסון בדפדפן חסום או מלא.');
+    const saved = !parentUse && marks.length > 0 ? 'נשמר. מודל לא מצונזר לא עונה כשהאפליקציה בשימוש של ילדה.' : 'נשמר.';
+    setSaveStatus(savedSettings && savedKey ? saved : 'לא נשמר. ייתכן שהאחסון בדפדפן חסום או מלא.');
   };
 
   const removeKey = () => {
@@ -331,46 +397,64 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
 
         <section className="card">
           <h2 className="card-title">איזה מודל מאחורי כל מצב</h2>
+          <div className="button-row">
+            <button type="button" className="button" disabled={list.state === 'loading'} onClick={loadList}>
+              טעינת רשימת המודלים
+            </button>
+          </div>
+          {list.state === 'idle' && <p className="hint">עם מפתח אפשר לטעון את רשימת המודלים של הספק ולבחור ממנה. בלי הרשימה מקלידים את שם המודל.</p>}
+          {list.state === 'loading' && <p className="hint">טוען את רשימת המודלים...</p>}
+          {list.state === 'ready' && (
+            <>
+              <p className="hint">נטענו {list.models.length} מודלים מהספק. אפשר לבחור מהרשימה או להקליד שם מודל. לכל שדה מוצגים רק המודלים שמתאימים לו.</p>
+              <p className="hint">
+                התגיות הן של הספק. Private: הספק לא שומר דבר. Anonymized: החברה של המודל רואה את הטקסט, אבל לא מי שלח אותו. TEE ו-E2EE: המודל תומך בכך; האפליקציה שולחת בקשות רגילות ולא מצפינה מקצה לקצה. המחיר הוא
+                בדולרים (USD) למיליון טוקנים, מהזול (קלט שמור במטמון) עד היקר (פלט). מודלים עם התגית Uncensored מוצגים רק כשהתיבה "האפליקציה בשימוש של ילדה" לא מסומנת.
+              </p>
+            </>
+          )}
+          {list.state === 'failed' && (
+            <>
+              <p className="hint">רשימת המודלים לא נטענה: {list.text} אפשר להקליד את שם המודל.</p>
+              {list.detail && (
+                <p className="hint detail" dir="auto">
+                  {list.detail}
+                </p>
+              )}
+            </>
+          )}
           {MODES.filter((m) => isReady(m.id)).map((m) => (
-            <div className="field" key={m.id}>
-              <label htmlFor={`model-${m.id}`}>מודל למצב "{m.name}"</label>
-              <input
-                id={`model-${m.id}`}
-                className="input"
-                type="text"
-                autoComplete="off"
-                autoCapitalize="off"
-                autoCorrect="off"
-                spellCheck={false}
-                dir="ltr"
-                maxLength={MAX_MODEL_CHARS}
-                value={draft.models[m.id]}
-                onChange={(event) => change({ models: { ...draft.models, [m.id]: event.target.value } })}
-              />
-            </div>
-          ))}
-          <div className="field">
-            <label htmlFor="model-files">מודל לתמונות ולקבצים שהיא מצרפת</label>
-            <input
-              id="model-files"
-              className="input"
-              type="text"
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              dir="ltr"
+            <ModelField
+              key={m.id}
+              id={`model-${m.id}`}
+              label={`מודל למצב "${m.name}"`}
+              field={m.id}
               maxLength={MAX_MODEL_CHARS}
-              value={draft.fileModel ?? ''}
-              onChange={(event) => change({ fileModel: event.target.value })}
+              value={draft.models[m.id]}
+              onChange={(value) => change({ models: { ...draft.models, [m.id]: value } })}
+              models={models}
+              parentUse={parentUse}
+              blocked={blocked(draft.models[m.id])}
             />
+          ))}
+          <ModelField
+            id="model-files"
+            label="מודל לתמונות ולקבצים שהיא מצרפת"
+            field="files"
+            maxLength={MAX_MODEL_CHARS}
+            value={draft.fileModel ?? ''}
+            onChange={(value) => change({ fileModel: value })}
+            models={models}
+            parentUse={parentUse}
+            blocked={blocked(draft.fileModel)}
+          >
             <p className="hint">
               ריק = היא לא יכולה לצרף קבצים. עם שם מודל, במצבים "שיחה" ו"חשבון" היא יכולה לצרף להודעה תמונה, PDF או קובץ Word. הקובץ נשלח לספק עם ההודעה, ושוב עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קובץ אחר; כל שליחה כזאת עולה כסף. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב. צריך מודל שיודע לקרוא תמונות (vision).
             </p>
             <p className="hint">
               תמונה נשלחת מוקטנת ובלי הנתונים הנסתרים שלה (מיקום, תאריך, סוג הטלפון), אבל מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת. מסמך נשלח כמו שהוא, עם כל מה שכתוב בו וגם מה שלא רואים בו: שם מי שכתב אותו, הערות, שינויים שנמחקו ותמונות שבתוכו עם הנתונים הנסתרים שלהן. הקבצים נשמרים עם השיחה רק באייפון הזה.
             </p>
-          </div>
+          </ModelField>
           <p className="hint">שם המודל כפי שהוא מופיע אצל הספק. הילדה רואה רק את שם המצב. כדאי לבחור רק מודלים עם סינון תוכן.</p>
           <p className="hint">במצב "ציור" נשלח לספק רק מה שהיא ביקשה לצייר, עם סינון תוכן למבוגרים. האפליקציה שומרת את התמונות רק באייפון הזה; בלחיצה ארוכה על תמונה היא יכולה לשמור או לשתף אותה בעצמה.</p>
           <p className="hint">תמונה מוצגת רק אם הספק אישר שהיא לא סומנה כלא מתאימה. אם כל בקשת ציור נדחית, ייתכן שהדפדפן לא מצליח לקרוא את האישור הזה מהספק.</p>

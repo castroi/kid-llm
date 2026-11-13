@@ -1,3 +1,4 @@
+import type { ModelInfo } from '../ai/models';
 import type { ParentServices } from '../app/parentServices';
 import { appVersion, type AppVersion } from '../core/version';
 import type { PinResult } from '../storage/pin';
@@ -14,6 +15,12 @@ export interface FakePhone {
   tried: string[];
   /** Every key a connection check was made with ('' = the saved one). */
   checkedWith: string[];
+  /** What the provider's list of models holds. */
+  models: ModelInfo[];
+  /** The list of models can't be loaded: the call rejects with this. */
+  listFails: unknown;
+  /** Every key the list of models was asked for with ('' = the saved one). */
+  listedWith: string[];
   /** The phone refuses to save. */
   refuses: boolean;
   /** The build the parent area says it is. */
@@ -31,6 +38,9 @@ export function fakeParent(initial: Partial<FakePhone> = {}, check: () => Promis
     chatsDeleted: 0,
     tried: [],
     checkedWith: [],
+    models: [],
+    listFails: null,
+    listedWith: [],
     refuses: false,
     version: appVersion('0123456789abcdef0123456789abcdef01234567', '2026-11-12T14:05:00+02:00'),
     ...initial,
@@ -51,6 +61,11 @@ export function fakeParent(initial: Partial<FakePhone> = {}, check: () => Promis
     checkConnection: (_provider, typedKey) => {
       phone.checkedWith.push(typedKey);
       return check();
+    },
+    listModels: async (_provider, typedKey) => {
+      phone.listedWith.push(typedKey);
+      if (phone.listFails) throw phone.listFails;
+      return phone.models;
     },
     hasSetup: () => phone.apiKey !== '' || JSON.stringify(phone.settings) !== JSON.stringify(DEFAULT_SETTINGS),
     forgetSetup: () => {

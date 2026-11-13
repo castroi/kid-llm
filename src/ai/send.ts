@@ -1,5 +1,6 @@
 import { imagePromptFor, systemPromptFor } from './baseline';
 import type { AiProviderId } from './catalog';
+import type { ModelInfo } from './models';
 import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, type GeneratedImage } from './providers';
 
 /**
@@ -20,6 +21,8 @@ export const CHAT_IDLE_TIMEOUT_MS = 60_000;
  */
 export const CHAT_NO_TEXT_TIMEOUT_MS = 180_000;
 export const CHECK_TIMEOUT_MS = 20_000;
+/** The list of models is one short answer; the parent waits this long for it at most. */
+export const MODELS_TIMEOUT_MS = 20_000;
 /** A picture arrives whole, with nothing in between; this is the longest she waits for one. */
 export const IMAGE_TIMEOUT_MS = 120_000;
 
@@ -176,5 +179,15 @@ export function checkConnection(
 ): Promise<string | null> {
   return withDeadline(options.signal, options.timeoutMs ?? CHECK_TIMEOUT_MS, async (signal) =>
     ADAPTERS[provider].checkKey({ apiKey: usableKey(apiKey), signal, fetch: options.fetch ?? defaultFetch }),
+  );
+}
+
+/**
+ * Asks the provider which models it has, for the parent area's picker. The call carries the
+ * parent's key and nothing else: no chat, no name. Rejects with an AiError.
+ */
+export function listModels(provider: AiProviderId, apiKey: string, options: { signal?: AbortSignal; fetch?: FetchLike; timeoutMs?: number } = {}): Promise<ModelInfo[]> {
+  return withDeadline(options.signal, options.timeoutMs ?? MODELS_TIMEOUT_MS, async (signal) =>
+    ADAPTERS[provider].listModels({ apiKey: usableKey(apiKey), signal, fetch: options.fetch ?? defaultFetch }),
   );
 }
