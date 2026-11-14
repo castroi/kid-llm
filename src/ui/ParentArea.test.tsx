@@ -705,9 +705,13 @@ describe('the model picker', () => {
     await openWithList();
     const note = screen.getByText(/E2EE: בשיחה ובחשבון ההודעות מוצפנות באייפון/);
     expect(note).toHaveTextContent('אם הבדיקה נכשלת דבר לא נשלח');
-    // It doesn't claim more than the check proves.
-    expect(note).toHaveTextContent('הבדיקה סומכת על הדיווח של Venice עצמה');
+    // It doesn't claim more than the check proves: the key is the one Venice reports, and neither
+    // Intel's signature nor the key's binding to the enclave is checked yet.
+    expect(note).toHaveTextContent('למפתח ש-Venice מדווחת שהוא של הסביבה המוגנת של המודל');
+    expect(note).toHaveTextContent('וגם לא שהמפתח באמת שייך לסביבה המוגנת');
+    expect(note).toHaveTextContent('ההגנה תלויה בכך ש-Venice מדווחת אמת');
     expect(note).not.toHaveTextContent('רק הסביבה המוגנת של המודל יכולה לפתוח');
+    expect(note).not.toHaveTextContent('Venice מעבירה רק טקסט מוצפן');
     expect(note).toHaveTextContent('התשובות הקודמות בשיחה נשלחות שוב כמו שהן, לא מוצפנות');
     expect(note).toHaveTextContent('חיפוש וקבצים מצורפים לא נשלחים מוצפנים');
   });

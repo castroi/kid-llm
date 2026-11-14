@@ -6,8 +6,10 @@ import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 /**
  * Venice's end-to-end encryption, as its guide describes it: her messages are encrypted on
- * the phone to a key that only the model's enclave (TEE) holds, and the answer comes back
- * encrypted to a key that only this call holds. Venice relays ciphertext only.
+ * the phone to the key the attestation names as the model's enclave (TEE) key, and the answer
+ * comes back encrypted to a key that only this call holds. That the key really is the
+ * enclave's rests on Venice's word for now: Intel's signature on the quote and the key's
+ * binding to it are not checked (providers.ts, `attest`).
  * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models
  *
  * - Key agreement: ECDH on secp256k1; the shared secret is the 32-byte x-coordinate.
