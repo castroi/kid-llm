@@ -69,9 +69,11 @@ export function modelKeyFrom(value: unknown): string | null {
 
 function aesKey(secretKey: Uint8Array, publicKey: Uint8Array): Uint8Array {
   // getSharedSecret checks the point is on the curve; byte 0 is the parity, 1..32 the x-coordinate.
-  const shared = secp256k1.getSharedSecret(secretKey, publicKey, true).slice(1, 33);
-  const key = hkdf(sha256, shared, undefined, HKDF_INFO, 32);
-  shared.fill(0);
+  // The arrays are wiped after use; the library's own big numbers can't be from JavaScript.
+  const point = secp256k1.getSharedSecret(secretKey, publicKey, true);
+  const x = point.subarray(1, 33);
+  const key = hkdf(sha256, x, undefined, HKDF_INFO, 32);
+  point.fill(0);
   return key;
 }
 
@@ -109,16 +111,35 @@ export function decryptPiece(secretKey: Uint8Array, hex: string): string {
 }
 
 /*
- * The Intel TDX quote, only as far as the debug check needs it. Layout from Intel's TDX DCAP
- * quote format (v4/v5): a 48-byte header (TEE type 0x81 at offset 4), then the TD report body,
- * whose TD attributes sit 120 bytes in; bit 0 of their first byte is DEBUG.
+ * The Intel TDX quote, only as far as the debug check needs it (Intel's TDX DCAP quote format):
+ * - every version: a 48-byte header with the version (u16, little-endian) at 0 and the TEE
+ *   type (u32) at 4, 0x81 for TDX;
+ * - version 4: the TD report body follows the header right away (584 bytes);
+ * - version 5: a 6-byte descriptor comes first (body type u16, size u32), then the body:
+ *   type 2 is a TD report 1.0 (584 bytes), type 3 a TD report 1.5 (648 bytes).
+ * In every body the TD attributes sit 120 bytes in; bit 0 of their first byte is DEBUG.
+ * Any other version or body type is not read: it fails the check.
  */
 const QUOTE_HEADER_BYTES = 48;
 const TDX_TEE_TYPE = 0x81;
-const TD_ATTRIBUTES_AT = QUOTE_HEADER_BYTES + 120;
-/** Header plus the whole 584-byte TD report body. */
-const MIN_QUOTE_BYTES = QUOTE_HEADER_BYTES + 584;
+const TD_ATTRIBUTES_IN_BODY = 120;
+const TD_REPORT_BYTES: Record<number, number> = { 2: 584, 3: 648 };
 const MAX_QUOTE_CHARS = 64 * 1024;
+
+const u16 = (bytes: Uint8Array, at: number) => bytes[at] | (bytes[at + 1] << 8);
+const u32 = (bytes: Uint8Array, at: number) => (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0;
+
+/** Where the TD report body starts in a quote, or null for a quote this check can't read. */
+function tdReportAt(bytes: Uint8Array): number | null {
+  if (bytes.length < QUOTE_HEADER_BYTES + 6 || u32(bytes, 4) !== TDX_TEE_TYPE) return null;
+  const version = u16(bytes, 0);
+  if (version === 4) return bytes.length >= QUOTE_HEADER_BYTES + TD_REPORT_BYTES[2] ? QUOTE_HEADER_BYTES : null;
+  if (version !== 5) return null;
+  const size = TD_REPORT_BYTES[u16(bytes, QUOTE_HEADER_BYTES)];
+  const at = QUOTE_HEADER_BYTES + 6;
+  if (size === undefined || u32(bytes, QUOTE_HEADER_BYTES + 2) !== size || bytes.length < at + size) return null;
+  return at;
+}
 
 function quoteBytes(quote: string): Uint8Array | null {
   if (quote.length > MAX_QUOTE_CHARS) return null;
@@ -136,13 +157,13 @@ function quoteBytes(quote: string): Uint8Array | null {
 /**
  * Whether a TDX quote says its enclave is NOT in debug mode. False for a debug enclave and
  * for anything that can't be read as a TDX quote: a check that can't be made counts as failed.
- * This reads the quote only; it does not check the quote's signature (CLAUDE.md, the E2EE row).
+ * This reads the quote only. It does not check Intel's signature on it, so it catches a
+ * misconfigured enclave, not a provider that hands over a quote of its own making.
  */
 export function quoteIsNotDebug(quote: unknown): boolean {
   if (typeof quote !== 'string') return false;
   const bytes = quoteBytes(quote);
-  if (!bytes || bytes.length < MIN_QUOTE_BYTES) return false;
-  const teeType = bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) | (bytes[7] << 24);
-  if (teeType !== TDX_TEE_TYPE) return false;
-  return (bytes[TD_ATTRIBUTES_AT] & 0x01) === 0;
+  if (!bytes) return false;
+  const body = tdReportAt(bytes);
+  return body !== null && (bytes[body + TD_ATTRIBUTES_IN_BODY] & 0x01) === 0;
 }

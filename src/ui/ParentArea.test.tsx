@@ -705,6 +705,9 @@ describe('the model picker', () => {
     await openWithList();
     const note = screen.getByText(/E2EE: בשיחה ובחשבון ההודעות מוצפנות באייפון/);
     expect(note).toHaveTextContent('אם הבדיקה נכשלת דבר לא נשלח');
+    // It doesn't claim more than the check proves.
+    expect(note).toHaveTextContent('הבדיקה סומכת על הדיווח של Venice עצמה');
+    expect(note).not.toHaveTextContent('רק הסביבה המוגנת של המודל יכולה לפתוח');
     expect(note).toHaveTextContent('התשובות הקודמות בשיחה נשלחות שוב כמו שהן, לא מוצפנות');
     expect(note).toHaveTextContent('חיפוש וקבצים מצורפים לא נשלחים מוצפנים');
   });

@@ -311,13 +311,15 @@ export const MAX_ATTESTATION_BODY_CHARS = 1024 * 1024;
 
 /**
  * Asks Venice for the enclave's attestation for `model`, with a fresh 32-byte nonce, and
- * checks it the way the docs ask before the model's key may be trusted: Venice's own
- * verification passed, the nonce came back unchanged (no replay), it is the model asked
- * for, the enclave is not in debug mode, and the model's key is a valid point. Anything
- * missing or unreadable fails: then nothing of hers is sent. Returns the model's key.
+ * makes the checks the docs list: Venice's own verification passed, the nonce came back,
+ * it is the model asked for, the TDX quote is not in debug mode, and the model's key is a
+ * valid point. Anything missing or unreadable fails: then nothing of hers is sent.
+ * What this does NOT prove: all of it is Venice's own answer. Intel's signature on the quote
+ * (DCAP) and the key's binding to the quote (REPORTDATA) are not checked, so a provider that
+ * lied could hand over a key of its own. Returns the model's key, checked and as given.
  * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models#step-3-fetch-and-verify-tee-attestation
  */
-async function attest(model: string, apiKey: string, signal: AbortSignal, fetchFn: FetchLike): Promise<string> {
+async function attest(model: string, apiKey: string, signal: AbortSignal, fetchFn: FetchLike): Promise<{ key: string; asGiven: string }> {
   const nonce = attestationNonce();
   const url = `${AI_PROVIDERS.venice.endpoints.attestation}?model=${encodeURIComponent(model)}&nonce=${nonce}`;
   const response = await call(fetchFn, url, { method: 'GET', headers: headers(apiKey, false), signal });
@@ -340,19 +342,34 @@ async function attest(model: string, apiKey: string, signal: AbortSignal, fetchF
   }
   if (report.verified !== true) throw new AiError('not-verified', 'attestation not verified by the provider');
   if (typeof report.nonce !== 'string' || report.nonce.toLowerCase() !== nonce) throw new AiError('not-verified', 'attestation nonce mismatch');
-  if (report.model !== model) throw new AiError('not-verified', 'attestation is for another model');
+  // In any letter case: a name typed by hand may differ from the provider's in case only.
+  if (typeof report.model !== 'string' || report.model.toLowerCase() !== model.toLowerCase()) throw new AiError('not-verified', 'attestation is for another model');
   if (!quoteIsNotDebug(report.intel_quote)) throw new AiError('not-verified', 'enclave in debug mode, or no readable TDX quote');
-  const modelKey = modelKeyFrom(report.signing_key ?? report.signing_public_key);
-  if (!modelKey) throw new AiError('not-verified', 'no usable model key in the attestation');
-  return modelKey;
+  const given = report.signing_key ?? report.signing_public_key;
+  const key = modelKeyFrom(given);
+  if (!key || typeof given !== 'string') throw new AiError('not-verified', 'no usable model key in the attestation');
+  // The header carries the key as the attestation gave it, as in the docs' example; it is hex, so it is safe in a header.
+  return { key, asGiven: given };
+}
+
+/** The three headers that switch E2EE on, and nothing in a system or user message that isn't encrypted. */
+export function encryptedRequestProblem(headers: Record<string, string>, messages: readonly { role: string; content: unknown }[]): string | null {
+  if (!/^04[0-9a-f]{128}$/.test(headers['X-Venice-TEE-Client-Pub-Key'] ?? '')) return 'no valid client key header';
+  if (modelKeyFrom(headers['X-Venice-TEE-Model-Pub-Key']) === null) return 'no valid model key header';
+  if (headers['X-Venice-TEE-Signing-Algo'] !== 'ecdsa') return 'no signing algorithm header';
+  for (const { role, content } of messages) {
+    if (role === 'assistant') continue;
+    if (typeof content !== 'string' || !looksEncrypted(content)) return `a ${role} message that is not encrypted`;
+  }
+  return null;
 }
 
 /**
  * The same chat call, end-to-end encrypted: a key pair for this call only, the enclave's
  * attestation checked, every system and user message encrypted to the model's key, the
  * three X-Venice-TEE headers, and every piece of the answer decrypted. A piece that is
- * not encrypted, or that doesn't decrypt, ends the call: with E2EE on, a plain piece could
- * only have been written outside the enclave.
+ * not encrypted, or that doesn't decrypt, ends the call: with E2EE on, a plain piece was
+ * not written by the holder of the attested key.
  * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models#e2ee-models
  */
 async function streamChatE2ee(chat: ChatCall): Promise<ChatResult> {
@@ -368,16 +385,20 @@ async function streamChatE2ee(chat: ChatCall): Promise<ChatResult> {
     if (signal.aborted) throw new DOMException('The answer was stopped', 'AbortError');
     // The docs: only system and user messages are encrypted; earlier answers go as they are.
     const sent = [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages.map(({ role, content }) => ({ role, content }))].map((message) =>
-      message.role === 'assistant' ? message : { role: message.role, content: encryptFor(modelKey, message.content) },
+      message.role === 'assistant' ? message : { role: message.role, content: encryptFor(modelKey.key, message.content) },
     );
+    const sentHeaders: Record<string, string> = {
+      ...headers(apiKey, true),
+      'X-Venice-TEE-Client-Pub-Key': keys.publicKeyHex,
+      'X-Venice-TEE-Model-Pub-Key': modelKey.asGiven,
+      'X-Venice-TEE-Signing-Algo': 'ecdsa',
+    };
+    // Checked once more just before it leaves: without these headers Venice would not treat the call as E2EE.
+    const problem = encryptedRequestProblem(sentHeaders, sent);
+    if (problem) throw new AiError('bad-request', problem);
     const init: RequestInit = {
       method: 'POST',
-      headers: {
-        ...headers(apiKey, true),
-        'X-Venice-TEE-Client-Pub-Key': keys.publicKeyHex,
-        'X-Venice-TEE-Model-Pub-Key': modelKey,
-        'X-Venice-TEE-Signing-Algo': 'ecdsa',
-      },
+      headers: sentHeaders,
       body: JSON.stringify({
         model,
         messages: sent,

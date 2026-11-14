@@ -4,7 +4,7 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 import { base64, enclaveDecrypt, enclaveEncrypt, fakeQuote } from '../test/enclave';
 import { AI_PROVIDERS } from './catalog';
-import { ADAPTERS, AiError, MAX_ATTESTATION_BODY_CHARS, type FetchLike } from './providers';
+import { ADAPTERS, AiError, encryptedRequestProblem, MAX_ATTESTATION_BODY_CHARS, type FetchLike } from './providers';
 import { sendChat, type ChatRequest } from './send';
 
 const KEY = 'sk-test-secret';
@@ -40,7 +40,7 @@ interface VeniceOptions {
   /** The chat call is refused with this status. */
   chatStatus?: number;
   /** The answer's pieces: text is encrypted to the client's key, `{ plain }` is sent as it is. */
-  answer?: (string | { plain: string } | { raw: string })[];
+  answer?: (string | { plain: string } | { raw: string } | { tampered: string })[];
 }
 
 /** Venice and its enclave, as far as these calls go. */
@@ -73,7 +73,15 @@ function fakeVenice(options: VeniceOptions = {}) {
     if (options.chatStatus) return Promise.resolve(new Response(JSON.stringify({ error: 'Encrypted field is not valid hex' }), { status: options.chatStatus }));
     const client = headers['X-Venice-TEE-Client-Pub-Key'];
     const pieces = (options.answer ?? ['שלום ', 'לך!']).map((part) => {
-      const content = typeof part === 'string' ? (client ? enclaveEncrypt(client, part) : part) : 'plain' in part ? part.plain : part.raw;
+      let content: string;
+      if (typeof part === 'string') content = client ? enclaveEncrypt(client, part) : part;
+      else if ('plain' in part) content = part.plain;
+      else if ('raw' in part) content = part.raw;
+      else {
+        // Encrypted to the right key, then one byte of the tag changed.
+        const sealed = enclaveEncrypt(client, part.tampered);
+        content = sealed.slice(0, -2) + (sealed.endsWith('00') ? '01' : '00');
+      }
       return `data: ${JSON.stringify({ choices: [{ delta: { content }, finish_reason: null }] })}\n\n`;
     });
     return Promise.resolve(new Response(encoder.encode([...pieces, 'data: [DONE]\n\n'].join('')), { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
@@ -172,10 +180,20 @@ describe('a model the list tags E2EE', () => {
     expect(nonces[0]).not.toBe(nonces[1]);
   });
 
-  it('takes the key under its other name, and one without the 04 prefix', async () => {
+  it('takes the key under its other name and without the 04 prefix, and sends it on as the attestation gave it', async () => {
     const venice = fakeVenice({ attestation: (good) => ({ ...without(good, 'signing_key'), signing_public_key: (good.signing_key as string).slice(2) }) });
     await sendChat(request(venice.fetch));
-    expect(venice.chatCalls()[0].headers['X-Venice-TEE-Model-Pub-Key']).toBe(venice.enclavePublic);
+    const [chat] = venice.chatCalls();
+    // The header as in the docs' example: the attestation's value itself.
+    expect(chat.headers['X-Venice-TEE-Model-Pub-Key']).toBe(venice.enclavePublic.slice(2));
+    // The messages are still encrypted to the full key.
+    expect(enclaveDecrypt(venice.enclave, chat.body!.messages[1].content as string)).toBe('כמה זה 3+5?');
+  });
+
+  it('accepts the attestation for the same model named in another letter case', async () => {
+    const venice = fakeVenice({ attestation: (good) => ({ ...good, model: MODEL }) });
+    await sendChat(request(venice.fetch, { model: MODEL.toUpperCase() }));
+    expect(venice.chatCalls()).toHaveLength(1);
   });
 });
 
@@ -183,7 +201,7 @@ describe('an attestation that does not pass sends nothing of hers', () => {
   const cases: [string, VeniceOptions['attestation']][] = [
     ["Venice's own check failed", (good) => ({ ...good, verified: false })],
     ['no verdict at all', (good) => without(good, 'verified')],
-    ['the nonce is not the one asked with (a replay)', (good) => ({ ...good, nonce: 'ab'.repeat(32) })],
+    ['the nonce is not the one asked with', (good) => ({ ...good, nonce: 'ab'.repeat(32) })],
     ['no nonce', (good) => without(good, 'nonce')],
     ['it is for another model', (good) => ({ ...good, model: 'other-model' })],
     ['the enclave is in debug mode', (good) => ({ ...good, intel_quote: base64(fakeQuote({ debug: true })) })],
@@ -243,11 +261,20 @@ describe('other failures on the E2EE path', () => {
 });
 
 describe('an E2EE answer that is not what the enclave wrote', () => {
-  it('ends the call at a piece that is not encrypted: only the enclave may write to her', async () => {
+  it('ends the call at a piece that is not encrypted: only the holder of the attested key may write to her', async () => {
     const venice = fakeVenice({ answer: ['שלום ', { plain: 'injected text' }] });
     const req = request(venice.fetch);
     const err = await failureOf(sendChat(req));
     expect(err.reason).toBe('bad-response');
+    expect(req.deltas).toEqual(['שלום ']);
+  });
+
+  it('ends the call at a piece encrypted to her key whose tag was changed', async () => {
+    const venice = fakeVenice({ answer: ['שלום ', { tampered: 'לך' }] });
+    const req = request(venice.fetch);
+    const err = await failureOf(sendChat(req));
+    expect(err.reason).toBe('bad-response');
+    expect(err.detail).toBe('a piece of the answer could not be decrypted');
     expect(req.deltas).toEqual(['שלום ']);
   });
 
@@ -299,5 +326,41 @@ describe('when E2EE is not used', () => {
     const withFile = await failureOf(ADAPTERS.venice.streamChat({ ...base, webSearch: false, messages: [{ role: 'user', content: 'x', file }] }));
     expect(withFile.reason).toBe('bad-request');
     expect(venice.sent).toHaveLength(0);
+  });
+});
+
+describe('the check just before an encrypted call leaves', () => {
+  const enclavePublic = bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), false));
+  const client = bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), false));
+  const good = { 'X-Venice-TEE-Client-Pub-Key': client, 'X-Venice-TEE-Model-Pub-Key': enclavePublic, 'X-Venice-TEE-Signing-Algo': 'ecdsa' };
+  const sealed = enclaveEncrypt(enclavePublic, 'x');
+  const messages = [
+    { role: 'system', content: sealed },
+    { role: 'user', content: sealed },
+    { role: 'assistant', content: '8' },
+  ];
+
+  it('passes a call with the three headers and every system and user message encrypted', () => {
+    expect(encryptedRequestProblem(good, messages)).toBeNull();
+    // The key without its 04, as an attestation may give it.
+    expect(encryptedRequestProblem({ ...good, 'X-Venice-TEE-Model-Pub-Key': enclavePublic.slice(2) }, messages)).toBeNull();
+  });
+
+  it.each(TEE_HEADERS)('stops a call without %s', (name: string) => {
+    const headers: Record<string, string> = { ...good };
+    delete headers[name];
+    expect(encryptedRequestProblem(headers, messages)).not.toBeNull();
+  });
+
+  it('stops a call with a wrong header value', () => {
+    expect(encryptedRequestProblem({ ...good, 'X-Venice-TEE-Client-Pub-Key': client.slice(2) }, messages)).toBe('no valid client key header');
+    expect(encryptedRequestProblem({ ...good, 'X-Venice-TEE-Model-Pub-Key': 'abc' }, messages)).toBe('no valid model key header');
+    expect(encryptedRequestProblem({ ...good, 'X-Venice-TEE-Signing-Algo': 'none' }, messages)).toBe('no signing algorithm header');
+  });
+
+  it('stops a call with a system or user message in plain text', () => {
+    expect(encryptedRequestProblem(good, [...messages, { role: 'user', content: 'כמה זה 3+5?' }])).toBe('a user message that is not encrypted');
+    expect(encryptedRequestProblem(good, [{ role: 'system', content: 'Be kind.' }])).toBe('a system message that is not encrypted');
+    expect(encryptedRequestProblem(good, [{ role: 'user', content: [{ type: 'text', text: 'x' }] }])).toBe('a user message that is not encrypted');
   });
 });

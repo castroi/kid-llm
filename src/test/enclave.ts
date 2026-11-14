@@ -23,12 +23,26 @@ export function enclaveEncrypt(clientPublicHex: string, text: string): string {
   return bytesToHex(new Uint8Array([...secp256k1.getPublicKey(ephemeral, false), ...nonce, ...sealed]));
 }
 
-/** A TDX quote just long enough to read: TEE type 0x81 at offset 4, the DEBUG bit at offset 168. */
-export function fakeQuote({ debug = false, teeType = 0x81, length = 632 } = {}): Uint8Array {
-  const quote = new Uint8Array(length);
-  quote[0] = 4;
-  quote[4] = teeType;
-  if (debug) quote[168] = 0x01;
+/**
+ * A TDX quote laid out as Intel's DCAP quote format has it, as long as the debug check reads:
+ * a 48-byte header (version u16 at 0, TEE type u32 at 4), then for version 5 a 6-byte body
+ * descriptor (type u16, size u32), then the TD report body, whose TD attributes are 120 bytes
+ * in. Written from the format, not from src/ai/e2ee.ts.
+ */
+export function fakeQuote({ debug = false, version = 4, teeType = 0x81, bodyType = 2, bodySize, cut = 0 }: { debug?: boolean; version?: number; teeType?: number; bodyType?: number; bodySize?: number; cut?: number } = {}): Uint8Array {
+  const reportBytes = bodyType === 3 ? 648 : 584;
+  const bodyAt = version === 5 ? 54 : 48;
+  const quote = new Uint8Array(bodyAt + reportBytes - cut);
+  const view = new DataView(quote.buffer);
+  view.setUint16(0, version, true);
+  view.setUint32(4, teeType, true);
+  if (version === 5) {
+    view.setUint16(48, bodyType, true);
+    view.setUint32(50, bodySize ?? reportBytes, true);
+  }
+  // A body full of ones everywhere else, so a check that reads the wrong byte sees a debug bit.
+  quote.fill(0xff, bodyAt, quote.length);
+  if (bodyAt + 120 < quote.length) quote[bodyAt + 120] = debug ? 0x01 : 0x00;
   return quote;
 }
 export const base64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));

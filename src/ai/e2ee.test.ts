@@ -1,9 +1,31 @@
 // @vitest-environment node
 import { secp256k1 } from '@noble/curves/secp256k1.js';
-import { bytesToHex } from '@noble/hashes/utils.js';
+import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 import { base64, enclaveDecrypt, enclaveEncrypt, fakeQuote } from '../test/enclave';
 import { attestationNonce, decryptPiece, encryptFor, looksEncrypted, MIN_ENCRYPTED_HEX, modelKeyFrom, newClientKeys, quoteIsNotDebug, wipe } from './e2ee';
+
+/**
+ * A known answer made with another implementation (pyca/cryptography, as in Venice's Python
+ * example): recipient key 0x1f…1f, ephemeral key 0x2e…2e, nonce 00…0b. If the curve, the
+ * x-coordinate, the HKDF salt or info, or the layout were wrong here, this would not decrypt.
+ */
+const KNOWN = {
+  recipientSecret: '1f'.repeat(32),
+  recipientPublic: '04505f234a81fe3af88625ebda259dbaec44c72b181e2f64735f8b8ec8d7cf737766f224ea0c54423fd914028e8fd81502133f9aef9f794e5be600355fc5f3a150',
+  sealed:
+    '04d98a7def67e8370118f636620d0be08ed63344df68082b4f2f1844e7ce601483c24513adf106691cbf259fab7dd8ea7a70348b54e4a87c94c4d13e572f31ca89000102030405060708090a0b924a46abba205ed91b8be3905ce8fc2c187179e0d8f14cbdafb4b5b6b7c8a8b5969c',
+  text: 'כמה זה 3 + 5?',
+};
+
+describe('agreement with another implementation', () => {
+  it('decrypts a piece that pyca/cryptography encrypted, and derives the same public key', () => {
+    const secret = hexToBytes(KNOWN.recipientSecret);
+    expect(bytesToHex(secp256k1.getPublicKey(secret, false))).toBe(KNOWN.recipientPublic);
+    expect(looksEncrypted(KNOWN.sealed)).toBe(true);
+    expect(decryptPiece(secret, KNOWN.sealed)).toBe(KNOWN.text);
+  });
+});
 
 describe('end-to-end encryption (Venice E2EE)', () => {
   const enclave = secp256k1.utils.randomSecretKey();
@@ -78,17 +100,30 @@ describe('end-to-end encryption (Venice E2EE)', () => {
 });
 
 describe('the TDX debug check', () => {
-  it('passes a quote whose DEBUG bit is off, in base64 or in hex', () => {
+  it('passes a version 4 quote whose DEBUG bit is off, in base64 or in hex', () => {
     expect(quoteIsNotDebug(base64(fakeQuote()))).toBe(true);
     expect(quoteIsNotDebug(bytesToHex(fakeQuote()))).toBe(true);
     expect(quoteIsNotDebug(`0x${bytesToHex(fakeQuote())}`)).toBe(true);
     expect(quoteIsNotDebug(base64(fakeQuote()).replace(/\+/g, '-').replace(/\//g, '_'))).toBe(true);
   });
 
+  it('reads a version 5 quote past its body descriptor, for TD reports 1.0 and 1.5', () => {
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 5 })))).toBe(true);
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 5, bodyType: 3 })))).toBe(true);
+    // The review's case: a version 5 debug enclave must not pass.
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 5, debug: true })))).toBe(false);
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 5, bodyType: 3, debug: true })))).toBe(false);
+  });
+
   it('fails a debug enclave, and anything it cannot read as a TDX quote', () => {
     expect(quoteIsNotDebug(base64(fakeQuote({ debug: true })))).toBe(false);
     expect(quoteIsNotDebug(base64(fakeQuote({ teeType: 0x00 })))).toBe(false);
-    expect(quoteIsNotDebug(base64(fakeQuote({ length: 631 })))).toBe(false);
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 3 })))).toBe(false);
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 5, bodyType: 1 })))).toBe(false);
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 5, bodySize: 600 })))).toBe(false);
+    expect(quoteIsNotDebug(base64(fakeQuote({ cut: 1 })))).toBe(false);
+    expect(quoteIsNotDebug(base64(fakeQuote({ version: 5, cut: 1 })))).toBe(false);
+    expect(quoteIsNotDebug(base64(new Uint8Array(40)))).toBe(false);
     expect(quoteIsNotDebug('not a quote!')).toBe(false);
     expect(quoteIsNotDebug('A'.repeat(64 * 1024 + 4))).toBe(false);
     for (const value of [undefined, null, 7, {}, '']) expect(quoteIsNotDebug(value)).toBe(false);
