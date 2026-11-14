@@ -84,9 +84,16 @@ function splitInline(line: string): Inline[] {
       // After an address, so do the other marks that end a sentence or a quote, markdown's
       // stars, and a closing bracket the address didn't open.
       const run = link ?? maths;
-      const opened = link !== undefined && run.includes('(');
+      // Brackets still open in the address: a ")" past them closes the sentence's own bracket.
+      let open = 0;
+      if (link !== undefined) for (const char of run) open += char === '(' ? 1 : char === ')' ? -1 : 0;
       let end = run.length;
-      while (end > 0 && (run[end - 1] === '.' || run[end - 1] === ',' || (link !== undefined && (ADDRESS_END.includes(run[end - 1]) || (run[end - 1] === ')' && !opened))))) end--;
+      while (end > 0) {
+        const char = run[end - 1];
+        if (char === ')' && link !== undefined && open < 0) open++;
+        else if (!(char === '.' || char === ',' || (link !== undefined && ADDRESS_END.includes(char)))) break;
+        end--;
+      }
       if (link !== undefined) {
         const url = run.slice(0, end);
         if (url.length > 'https://'.length) parts.push({ kind: 'link', text: url, url });

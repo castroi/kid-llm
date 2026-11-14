@@ -37,6 +37,7 @@ describe('parseInline', () => {
     expect(kinds('(ראי https://a.com/x).')).toEqual(['text:(ראי ', 'link:https://a.com/x', 'text:).']);
     expect(kinds('https://en.wikipedia.org/wiki/Cat_(disambiguation)')).toEqual(['link:https://en.wikipedia.org/wiki/Cat_(disambiguation)']);
     expect(kinds('https://')).toEqual(['text:https://']);
+    expect(kinds('(https://a.com/w_(x)).')).toEqual(['text:(', 'link:https://a.com/w_(x)', 'text:).']);
   });
 
   it('keeps a pair of brackets inside a markdown link\'s address', () => {

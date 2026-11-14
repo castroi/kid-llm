@@ -1,6 +1,9 @@
 import { siteName } from '../ai/sources';
 import { parseAnswer, type Inline, type LinkPart } from '../core/answerText';
 
+/** A label that reads as an address ("https://…") or a site's name ("www.google.com", "google.com/x"). */
+const LOOKS_LIKE_SITE = /:\/\/|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:[/:?#]|\s|$)/i;
+
 /**
  * An address the model wrote. For her it stays text. In a parent's own use a safe https
  * address can be tapped, and the link is shown by its site's name (never by the model's
@@ -19,8 +22,8 @@ function Link({ part, links }: { part: LinkPart; links: boolean }) {
   }
   return (
     <>
-      {/* A label that is itself an address could pass for another site: only the real site is shown. */}
-      {labelled && !part.text.includes('://') && `${part.text} `}
+      {/* A label that is itself an address or a site's name could pass for another site: only the real site is shown. */}
+      {labelled && !LOOKS_LIKE_SITE.test(part.text) && `${part.text} `}
       <a className="source-link" href={new URL(part.url).href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
         <bdi dir="ltr">{site}</bdi>
       </a>
