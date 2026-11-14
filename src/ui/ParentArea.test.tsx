@@ -676,6 +676,39 @@ describe('the model picker', () => {
     expect(phone.settings.uncensored).toEqual(['gone-model']);
   });
 
+  it("saves that a chosen model is end-to-end encrypted, by the provider's tag", async () => {
+    const { phone } = await openWithList();
+    await userEvent.click(listButton(CHAT));
+    const tagged = screen.getByRole('button', { name: /deepseek-v4-1-flash/ });
+    expect(tagged).toHaveTextContent('E2EE');
+    await userEvent.click(tagged);
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.models.chat).toBe('deepseek-v4-1-flash');
+    expect(phone.settings.e2ee).toEqual(['deepseek-v4-1-flash']);
+  });
+
+  it('never marks a model end-to-end encrypted by its name', async () => {
+    const { phone } = await openWithList();
+    await userEvent.type(screen.getByLabelText(CHAT), 'e2ee-not-on-the-list');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.e2ee).toBeUndefined();
+  });
+
+  it('keeps a saved E2EE mark for a model the list does not know, and drops it when the list has no tag for the model', async () => {
+    const saved = { provider: 'venice' as const, models: { chat: 'gone-model', search: '', math: 'llama-3.3-70b', draw: '' }, systemPrompt: '', childName: '', dailyLimit: null, e2ee: ['gone-model', 'llama-3.3-70b'] };
+    const { phone } = await openWithList({ settings: saved });
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.e2ee).toEqual(['gone-model']);
+  });
+
+  it('tells the parent what E2EE covers and what it does not', async () => {
+    await openWithList();
+    const note = screen.getByText(/E2EE: בשיחה ובחשבון ההודעות מוצפנות באייפון/);
+    expect(note).toHaveTextContent('אם הבדיקה נכשלת דבר לא נשלח');
+    expect(note).toHaveTextContent('התשובות הקודמות בשיחה נשלחות שוב כמו שהן, לא מוצפנות');
+    expect(note).toHaveTextContent('חיפוש וקבצים מצורפים לא נשלחים מוצפנים');
+  });
+
   it('knows a listed uncensored model typed by hand in another letter case', async () => {
     const { phone } = await openWithList();
     await userEvent.type(screen.getByLabelText(CHAT), 'WILD-Model');

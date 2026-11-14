@@ -101,6 +101,13 @@ export interface ChatRequest {
   apiKey: string;
   /** Search mode: look the question up on the web first. What is sent in `messages` then also reaches a search engine, through the provider. */
   webSearch?: boolean;
+  /**
+   * The provider's list tagged the model as supporting end-to-end encryption (saved with the
+   * choice; never guessed from its name). The call is then encrypted (src/ai/e2ee.ts), except
+   * a search call or a call that carries a file: Venice disables web search and takes no
+   * files with E2EE, so those go as ordinary calls to the same enclave (TEE).
+   */
+  e2ee?: boolean;
   /** Called with each piece of the answer as it arrives, so she sees it being written. */
   onDelta: (text: string) => void;
   /** Her "עצירה". The pieces already given to onDelta stay hers to keep. */
@@ -127,6 +134,7 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
       messages,
       apiKey,
       webSearch: req.webSearch === true,
+      e2ee: req.e2ee === true && req.webSearch !== true && !withFile,
       signal,
       fetch: req.fetch ?? defaultFetch,
       onDelta: (text) => {

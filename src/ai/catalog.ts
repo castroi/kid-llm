@@ -18,6 +18,8 @@ export interface AiProvider {
     image: string;
     /** The provider's list of models, for the parent area's model picker. Carries the key only, nothing of hers. */
     models: string;
+    /** The enclave's attestation and public key, asked for before each end-to-end encrypted chat call. Carries the key, the model name and a random nonce. */
+    attestation: string;
   };
 }
 
@@ -30,6 +32,7 @@ export const AI_PROVIDERS: Record<AiProviderId, AiProvider> = {
       check: 'https://api.venice.ai/api/v1/api_keys/rate_limits',
       image: 'https://api.venice.ai/api/v1/image/generate',
       models: 'https://api.venice.ai/api/v1/models',
+      attestation: 'https://api.venice.ai/api/v1/tee/attestation',
     },
   },
 };

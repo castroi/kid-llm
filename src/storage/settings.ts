@@ -37,6 +37,13 @@ export interface Settings {
    * Absent = none. Written by the parent area from the provider's list.
    */
   uncensored?: string[];
+  /**
+   * Which of the chosen models the provider's list tags as supporting end-to-end encryption
+   * (`supportsE2EE`). Calls to them are encrypted (src/ai/send.ts). Only the tag counts, never
+   * the name: Venice gives TEE and E2EE the same model name. Absent = none. Written by the
+   * parent area from the provider's list.
+   */
+  e2ee?: string[];
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -72,8 +79,11 @@ export function sanitizeSettings(raw: unknown): Settings {
   const fileModel = text(value.fileModel, MAX_MODEL_CHARS).trim();
   // Only marks for models that are chosen are kept, each once.
   const chosen = new Set([...Object.values(models), fileModel].filter((model) => model !== ''));
-  const marked = Array.isArray(value.uncensored) ? value.uncensored.map((model) => text(model, MAX_MODEL_CHARS).trim()) : [];
+  const marks = (list: unknown): string[] => (Array.isArray(list) ? list.map((model) => text(model, MAX_MODEL_CHARS).trim()) : []);
+  const marked = marks(value.uncensored);
   const uncensored = [...chosen].filter((model) => marked.includes(model));
+  const encrypting = marks(value.e2ee);
+  const e2ee = [...chosen].filter((model) => encrypting.includes(model));
   return {
     provider: typeof value.provider === 'string' && Object.hasOwn(AI_PROVIDERS, value.provider) ? (value.provider as AiProviderId) : DEFAULT_SETTINGS.provider,
     models,
@@ -84,6 +94,7 @@ export function sanitizeSettings(raw: unknown): Settings {
     // Only the exact value a parent's untick saves; anything else is a child's phone.
     ...(value.parentUse === true ? { parentUse: true as const } : {}),
     ...(uncensored.length > 0 ? { uncensored } : {}),
+    ...(e2ee.length > 0 ? { e2ee } : {}),
   };
 }
 
@@ -134,6 +145,11 @@ export function saveApiKey(provider: AiProviderId, apiKey: string, storage: KeyV
  */
 export function isUncensored(model: string, settings: Settings): boolean {
   return model !== '' && (looksUncensored(model) || (settings.uncensored ?? []).includes(model));
+}
+
+/** The provider's list tagged this chosen model as supporting end-to-end encryption, so its calls are encrypted. */
+export function isE2ee(model: string, settings: Settings): boolean {
+  return model !== '' && (settings.e2ee ?? []).includes(model);
 }
 
 /** A model as it may be called now: an uncensored one only in a parent's own use, otherwise none. */

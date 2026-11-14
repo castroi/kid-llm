@@ -237,6 +237,15 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
     const known = listed(model);
     return looksUncensored(model) || (known ? known.uncensored : (draft.uncensored ?? []).includes(model));
   };
+  /**
+   * End-to-end encryption, by the provider's tag only (`supportsE2EE`): when the list knows the
+   * model, its tag; otherwise the mark saved when it was chosen. Never by the name.
+   */
+  const e2ee = (model: string): boolean => {
+    if (model === '') return false;
+    const known = listed(model);
+    return known ? known.e2ee : (draft.e2ee ?? []).includes(model);
+  };
   /** Chosen for a child's phone, where it will not answer. */
   const blocked = (model: string | undefined): boolean => !parentUse && uncensored((model ?? '').trim());
   /** Typed for a child's phone, and the loaded list doesn't know it: whether it is uncensored can't be checked. */
@@ -304,7 +313,8 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
     // Which chosen models are uncensored is saved with them: the chat screen has no list to ask.
     const chosen = [...Object.values(draft.models), draft.fileModel ?? ''].map((model) => model.trim());
     const marks = [...new Set(chosen.filter(uncensored))];
-    const savedSettings = parent.saveSettings({ ...draft, dailyLimit: limit, uncensored: marks.length > 0 ? marks : undefined });
+    const encrypted = [...new Set(chosen.filter(e2ee))];
+    const savedSettings = parent.saveSettings({ ...draft, dailyLimit: limit, uncensored: marks.length > 0 ? marks : undefined, e2ee: encrypted.length > 0 ? encrypted : undefined });
     const savedKey = keyText.trim() ? parent.saveApiKey(provider, keyText) : true;
     if (savedKey) setKeyText('');
     setKeySaved(parent.hasApiKey(provider));
@@ -415,7 +425,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             <>
               <p className="hint">נטענו {list.models.length} מודלים מהספק. אפשר לבחור מהרשימה או להקליד שם מודל. לכל שדה מוצגים רק המודלים שמתאימים לו.</p>
               <p className="hint">
-                התגיות הן של הספק. Private: הספק לא שומר דבר. Anonymized: החברה של המודל רואה את הטקסט, אבל לא מי שלח אותו. TEE ו-E2EE: המודל תומך בכך; האפליקציה שולחת בקשות רגילות ולא מצפינה מקצה לקצה. המחיר הוא
+                התגיות הן של הספק. Private: הספק לא שומר דבר. Anonymized: החברה של המודל רואה את הטקסט, אבל לא מי שלח אותו. TEE: המודל רץ בסביבה מוגנת בחומרה, אבל הטקסט מגיע לספק כמו שהוא. E2EE: בשיחה ובחשבון ההודעות מוצפנות באייפון ורק הסביבה המוגנת של המודל יכולה לפתוח אותן; האפליקציה בודקת קודם את האימות (attestation) של הסביבה, ואם הבדיקה נכשלת דבר לא נשלח. התשובות הקודמות בשיחה נשלחות שוב כמו שהן, לא מוצפנות. חיפוש וקבצים מצורפים לא נשלחים מוצפנים גם במודל E2EE. המחיר הוא
                 בדולרים (USD) למיליון טוקנים, מהזול (קלט שמור במטמון) עד היקר (פלט). מודלים עם התגית Uncensored מוצגים רק כשהתיבה "האפליקציה בשימוש של ילדה" לא מסומנת.
               </p>
             </>

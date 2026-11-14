@@ -9,7 +9,7 @@ import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage,
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
-import { fileModelFor, missingFor, modelFor, type Settings } from '../storage/settings';
+import { fileModelFor, isE2ee, missingFor, modelFor, type Settings } from '../storage/settings';
 
 /** Everything the chat needs from outside, so tests can stand in for the phone and the provider. */
 export interface Services {
@@ -211,13 +211,16 @@ export function useChat(services: Services): ChatController {
           // Another picture for the same request counts toward the day once it really arrives.
           if (countOnFirstPiece) count();
         } else {
+          const model = withFile ? fileModel : modelFor(forMode, settings);
           const result = await services.sendChat({
             provider: settings.provider,
-            model: withFile ? fileModel : modelFor(forMode, settings),
+            model,
             systemPrompt: settings.systemPrompt,
             messages: withFile ? talk : talk.map(({ role, content }) => ({ role, content })),
             apiKey,
             webSearch: forMode === 'search',
+            // By the provider's tag saved with the choice; send.ts leaves it off for a search or a file.
+            ...(isE2ee(model, settings) ? { e2ee: true } : {}),
             // The child baseline is left out only when a parent switched the app to their own use.
             ...(settings.parentUse === true ? { kidUse: false } : {}),
             signal: controller.signal,

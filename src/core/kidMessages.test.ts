@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AiErrorReason } from '../ai/providers';
 import { attachmentMessage, kidMessage } from './kidMessages';
 
-const ALL: AiErrorReason[] = ['unauthorized', 'no-credit', 'rate-limited', 'bad-request', 'provider-down', 'refused', 'network', 'timeout', 'cancelled', 'bad-response'];
+const ALL: AiErrorReason[] = ['unauthorized', 'no-credit', 'rate-limited', 'bad-request', 'provider-down', 'refused', 'network', 'timeout', 'cancelled', 'not-verified', 'bad-response'];
 
 describe('kidMessage', () => {
   it('offers to try again only when trying again can help', () => {
@@ -15,7 +15,7 @@ describe('kidMessage', () => {
   });
 
   it('sends her to a parent for what only a parent can fix', () => {
-    for (const reason of ['unauthorized', 'no-credit', 'bad-request'] as const) {
+    for (const reason of ['unauthorized', 'no-credit', 'bad-request', 'not-verified'] as const) {
       expect(kidMessage(reason).text).toBe('משהו לא עובד. כדאי לקרוא לאבא או לאמא.');
     }
   });
