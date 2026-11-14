@@ -528,7 +528,7 @@ describe('the model picker', () => {
     // '' = the saved key, which the screen never holds.
     expect(new Set(phone.listedWith)).toEqual(new Set(['']));
     expect(screen.getByText(/Private: הספק לא שומר דבר\. Anonymized: החברה של המודל רואה את הטקסט, אבל לא מי שלח אותו/)).toBeInTheDocument();
-    expect(screen.getByText(/האפליקציה שולחת בקשות רגילות ולא מצפינה מקצה לקצה/)).toBeInTheDocument();
+    expect(screen.getByText(/TEE: המודל רץ בסביבה מוגנת בחומרה, אבל הטקסט מגיע לספק כמו שהוא/)).toBeInTheDocument();
   });
 
   it('asks for nothing without a key: the name is typed by hand, as before', async () => {
