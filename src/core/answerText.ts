@@ -29,7 +29,10 @@ const NUMBER = String.raw`[-+]?(?:[\d(][\d.,()]{0,30}[a-zA-Z]?|[a-zA-Z](?![a-zA-
 const EXPRESSION = String.raw`${NUMBER}(?:\s*[-+*/÷×=<>^]\s*${NUMBER})+%?`;
 /** "-5", "+3", "50%", "12 km", "30°", "23 °F". */
 const SIGNED_OR_UNIT = String.raw`[-+]\d[\d.,]{0,30}%?|\d[\d.,]{0,30}\s?(?:%|°[a-zA-Z]?|[a-zA-Z]{1,12}\b)`;
-const INLINE = new RegExp(String.raw`\x60([^\x60\n]+)\x60|\*\*([^*\n]+)\*\*|\[([^\]\n]{1,300})\]\((https?:\/\/[^\s)]{1,2000})\)|(https?:\/\/\S+)|(${EXPRESSION}|${SIGNED_OR_UNIT})`, 'g');
+const INLINE = new RegExp(String.raw`\x60([^\x60\n]+)\x60|\*\*([^*\n]+)\*\*|\[([^\]\n]{1,300})\]\((https?:\/\/(?:[^\s()]|\([^\s()]{0,200}\)){1,2000})\)|(https?:\/\/\S+)|(${EXPRESSION}|${SIGNED_OR_UNIT})`, 'g');
+
+/** What may follow an address without being part of it. */
+const ADDRESS_END = ';:!?\'"*\u05F4';
 
 /**
  * A line longer than this is shown as plain text: a second guard on the time the patterns
@@ -77,11 +80,13 @@ function splitInline(line: string): Inline[] {
     // pattern, which older iPhones (before iOS 16.4) can't read at all.
     else if (maths !== undefined && /[a-zA-Z\d]/.test(line[match.index - 1] ?? '')) push('text', whole);
     else {
-      // A sentence's own full stop or comma stays with the sentence, not with the number or link,
-      // and so does a closing bracket the address didn't open.
+      // A sentence's own full stop or comma stays with the sentence, not with the number or link.
+      // After an address, so do the other marks that end a sentence or a quote, markdown's
+      // stars, and a closing bracket the address didn't open.
       const run = link ?? maths;
+      const opened = link !== undefined && run.includes('(');
       let end = run.length;
-      while (end > 0 && (run[end - 1] === '.' || run[end - 1] === ',' || (link !== undefined && run[end - 1] === ')' && !run.slice(0, end - 1).includes('(')))) end--;
+      while (end > 0 && (run[end - 1] === '.' || run[end - 1] === ',' || (link !== undefined && (ADDRESS_END.includes(run[end - 1]) || (run[end - 1] === ')' && !opened))))) end--;
       if (link !== undefined) {
         const url = run.slice(0, end);
         if (url.length > 'https://'.length) parts.push({ kind: 'link', text: url, url });

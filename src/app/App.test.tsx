@@ -490,6 +490,13 @@ describe("a parent's own use", () => {
     expect(screen.getByText('http://plain.example.com')).toBeInTheDocument();
   });
 
+  it('shows only the real site when the label is itself an address', async () => {
+    open({ settings: { parentUse: true }, send: answers('[https://google.com](https://evil.example.com/x)') });
+    await say('שלום');
+    expect(await screen.findByRole('link', { name: 'evil.example.com' })).toBeInTheDocument();
+    expect(screen.queryByText(/google\.com/)).not.toBeInTheDocument();
+  });
+
   it('never makes the model\'s address a link for her', async () => {
     open({ send: answers('[לחץ כאן](https://www.google.com/search?q=18V)') });
     await say('שלום');

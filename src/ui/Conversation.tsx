@@ -98,7 +98,7 @@ function Answer({ message, writing, last, onRetry, copyText, links }: { message:
       {message.image ? (
         <Picture image={message.image} />
       ) : message.text ? (
-        <AnswerText text={message.text} links={links} />
+        <AnswerText text={message.text} links={links && !beingWritten} />
       ) : message.mode === 'draw' ? (
         <p className="drawing">מציירת...</p>
       ) : (
@@ -145,7 +145,7 @@ export interface ConversationProps {
   writing: boolean;
   onRetry: () => void;
   copyText: (text: string) => Promise<void>;
-  /** A parent's own use: web addresses the model wrote can be tapped. Never for her. */
+  /** A parent's own use: web addresses the model wrote can be tapped, once the answer is finished. Never for her. */
   links?: boolean;
 }
 

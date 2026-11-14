@@ -39,6 +39,16 @@ describe('parseInline', () => {
     expect(kinds('https://')).toEqual(['text:https://']);
   });
 
+  it('keeps a pair of brackets inside a markdown link\'s address', () => {
+    expect(parseInline('[חתול](https://en.wikipedia.org/wiki/Cat_(x))')).toEqual([{ kind: 'link', text: 'חתול', url: 'https://en.wikipedia.org/wiki/Cat_(x)' }]);
+  });
+
+  it('leaves the marks that end a sentence or a quote, and markdown stars, out of a bare address', () => {
+    for (const end of [';', ':', '!', '?', "'", '"', '**', '\u05F4', '?!']) {
+      expect(kinds(`https://a.com/x${end}`)).toEqual(['link:https://a.com/x', `text:${end}`]);
+    }
+  });
+
   it('gives back text it has nothing to say about, also when it is empty', () => {
     expect(kinds('שלום, מה נשמע?')).toEqual(['text:שלום, מה נשמע?']);
     expect(kinds('')).toEqual([]);

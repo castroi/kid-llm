@@ -19,7 +19,8 @@ function Link({ part, links }: { part: LinkPart; links: boolean }) {
   }
   return (
     <>
-      {labelled && `${part.text} `}
+      {/* A label that is itself an address could pass for another site: only the real site is shown. */}
+      {labelled && !part.text.includes('://') && `${part.text} `}
       <a className="source-link" href={new URL(part.url).href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
         <bdi dir="ltr">{site}</bdi>
       </a>
