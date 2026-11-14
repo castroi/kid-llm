@@ -491,12 +491,13 @@ describe("a parent's own use", () => {
   });
 
   it('shows only the real site when the label is itself an address', async () => {
-    open({ settings: { parentUse: true }, send: answers('[https://google.com](https://evil.example.com/x) [www.google.com](https://bad.example.com) [לחפש ב-google.com](https://worse.example.com)') });
+    open({ settings: { parentUse: true }, send: answers('[https://google.com](https://evil.example.com/x) [www.google.com](https://bad.example.com) [לחפש ב-google.com](https://worse.example.com) [לאתר google．com.](https://worst.example.com)') });
     await say('שלום');
     expect(await screen.findByRole('link', { name: 'evil.example.com' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'bad.example.com' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'worse.example.com' })).toBeInTheDocument();
-    expect(screen.queryByText(/google\.com/)).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'worst.example.com' })).toBeInTheDocument();
+    expect(screen.queryByText(/google/)).not.toBeInTheDocument();
   });
 
   it('never makes the model\'s address a link for her', async () => {

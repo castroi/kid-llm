@@ -1,8 +1,8 @@
 import { siteName } from '../ai/sources';
 import { parseAnswer, type Inline, type LinkPart } from '../core/answerText';
 
-/** A label that reads as an address ("https://…") or a site's name ("www.google.com", "google.com/x"). */
-const LOOKS_LIKE_SITE = /:\/\/|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:[/:?#]|\s|$)/i;
+/** A label that reads as an address ("https://…") or a site's name ("www.google.com", "google.com."), checked with wide letters made plain ("google．com"). */
+const LOOKS_LIKE_SITE = /:\/\/|[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?![a-z\d-])/i;
 
 /**
  * An address the model wrote. For her it stays text. In a parent's own use a safe https
@@ -23,7 +23,7 @@ function Link({ part, links }: { part: LinkPart; links: boolean }) {
   return (
     <>
       {/* A label that is itself an address or a site's name could pass for another site: only the real site is shown. */}
-      {labelled && !LOOKS_LIKE_SITE.test(part.text) && `${part.text} `}
+      {labelled && !LOOKS_LIKE_SITE.test(part.text.normalize('NFKC')) && `${part.text} `}
       <a className="source-link" href={new URL(part.url).href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
         <bdi dir="ltr">{site}</bdi>
       </a>
