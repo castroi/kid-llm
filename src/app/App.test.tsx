@@ -476,6 +476,27 @@ describe("a parent's own use", () => {
     expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
   });
 
+  it("makes an address the model wrote a link, shown by its site's name, only in a parent's own use", async () => {
+    const text = 'חיפוש: [לחץ כאן](https://www.google.com/search?q=18V) או http://plain.example.com';
+    open({ settings: { parentUse: true }, send: answers(text) });
+    await say('שלום');
+    const link = await screen.findByRole('link', { name: 'google.com' });
+    expect(link).toHaveAttribute('href', 'https://www.google.com/search?q=18V');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveAttribute('referrerpolicy', 'no-referrer');
+    // Not https: stays text.
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.getByText('http://plain.example.com')).toBeInTheDocument();
+  });
+
+  it('never makes the model\'s address a link for her', async () => {
+    open({ send: answers('[לחץ כאן](https://www.google.com/search?q=18V)') });
+    await say('שלום');
+    expect(await screen.findByText('https://www.google.com/search?q=18V')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('asks again without the child baseline on "try again" too', async () => {
     const { requests } = open({ settings: { parentUse: true } });
     await say('שלום');

@@ -91,14 +91,14 @@ function Sources({ sources }: { sources: readonly Source[] }) {
   );
 }
 
-function Answer({ message, writing, last, onRetry, copyText }: { message: StoredMessage; writing: boolean; last: boolean; onRetry: () => void; copyText: (text: string) => Promise<void> }) {
+function Answer({ message, writing, last, onRetry, copyText, links }: { message: StoredMessage; writing: boolean; last: boolean; onRetry: () => void; copyText: (text: string) => Promise<void>; links: boolean }) {
   const beingWritten = writing && last;
   return (
     <div className="answer">
       {message.image ? (
         <Picture image={message.image} />
       ) : message.text ? (
-        <AnswerText text={message.text} />
+        <AnswerText text={message.text} links={links} />
       ) : message.mode === 'draw' ? (
         <p className="drawing">מציירת...</p>
       ) : (
@@ -145,9 +145,11 @@ export interface ConversationProps {
   writing: boolean;
   onRetry: () => void;
   copyText: (text: string) => Promise<void>;
+  /** A parent's own use: web addresses the model wrote can be tapped. Never for her. */
+  links?: boolean;
 }
 
-export function Conversation({ messages, writing, onRetry, copyText }: ConversationProps) {
+export function Conversation({ messages, writing, onRetry, copyText, links = false }: ConversationProps) {
   const end = useRef<HTMLDivElement>(null);
   const lastText = messages[messages.length - 1]?.text;
   const lastHasPicture = messages[messages.length - 1]?.image !== undefined;
@@ -169,7 +171,7 @@ export function Conversation({ messages, writing, onRetry, copyText }: Conversat
             <CopyButton text={message.text} copyText={copyText} label="העתקה של מה שכתבתי" />
           </div>
         ) : (
-          <Answer key={message.id} message={message} writing={writing} last={index === messages.length - 1} onRetry={onRetry} copyText={copyText} />
+          <Answer key={message.id} message={message} writing={writing} last={index === messages.length - 1} onRetry={onRetry} copyText={copyText} links={links} />
         ),
       )}
       <div ref={end} />

@@ -112,7 +112,7 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
             </div>
           </div>
         ) : (
-          <Conversation messages={chat.messages} writing={writing} onRetry={retry} copyText={services.copyText} />
+          <Conversation messages={chat.messages} writing={writing} onRetry={retry} copyText={services.copyText} links={setup.parentUse} />
         )}
 
         <div className="notices" role="status">

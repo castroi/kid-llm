@@ -4,9 +4,17 @@
  * code are marked left-to-right, because inside Hebrew text "3 + 5 = 8" would otherwise
  * be shown in the opposite order.
  */
-export interface Inline {
-  kind: 'text' | 'bold' | 'code' | 'ltr';
+export type Inline = { kind: 'text' | 'bold' | 'code' | 'ltr'; text: string } | LinkPart;
+
+/**
+ * A web address the model wrote: bare, or as a markdown link "[label](address)". `text` is
+ * the label (the address itself for a bare one). It becomes something to tap only in a
+ * parent's own use (src/ui/AnswerText.tsx); otherwise it is shown as text.
+ */
+export interface LinkPart {
+  kind: 'link';
   text: string;
+  url: string;
 }
 
 export type Block = { kind: 'code'; text: string } | { kind: 'line'; parts: Inline[]; heading: boolean };
@@ -21,7 +29,7 @@ const NUMBER = String.raw`[-+]?(?:[\d(][\d.,()]{0,30}[a-zA-Z]?|[a-zA-Z](?![a-zA-
 const EXPRESSION = String.raw`${NUMBER}(?:\s*[-+*/÷×=<>^]\s*${NUMBER})+%?`;
 /** "-5", "+3", "50%", "12 km", "30°", "23 °F". */
 const SIGNED_OR_UNIT = String.raw`[-+]\d[\d.,]{0,30}%?|\d[\d.,]{0,30}\s?(?:%|°[a-zA-Z]?|[a-zA-Z]{1,12}\b)`;
-const INLINE = new RegExp(String.raw`\x60([^\x60\n]+)\x60|\*\*([^*\n]+)\*\*|(https?:\/\/\S+)|(${EXPRESSION}|${SIGNED_OR_UNIT})`, 'g');
+const INLINE = new RegExp(String.raw`\x60([^\x60\n]+)\x60|\*\*([^*\n]+)\*\*|\[([^\]\n]{1,300})\]\((https?:\/\/[^\s)]{1,2000})\)|(https?:\/\/\S+)|(${EXPRESSION}|${SIGNED_OR_UNIT})`, 'g');
 
 /**
  * A line longer than this is shown as plain text: a second guard on the time the patterns
@@ -51,7 +59,7 @@ export function parseInline(line: string): Inline[] {
 
 function splitInline(line: string): Inline[] {
   const parts: Inline[] = [];
-  const push = (kind: Inline['kind'], text: string) => {
+  const push = (kind: 'text' | 'bold' | 'code' | 'ltr', text: string) => {
     if (!text) return;
     const last = parts[parts.length - 1];
     if (kind === 'text' && last?.kind === 'text') last.text += text;
@@ -59,20 +67,26 @@ function splitInline(line: string): Inline[] {
   };
   let from = 0;
   for (const match of line.matchAll(INLINE)) {
-    const [whole, code, bold, link, maths] = match;
+    const [whole, code, bold, label, labelled, link, maths] = match;
     push('text', line.slice(from, match.index));
     from = match.index + whole.length;
     if (code !== undefined) push('code', code);
     else if (bold !== undefined) push('bold', bold);
+    else if (labelled !== undefined) parts.push({ kind: 'link', text: label.trim() || labelled, url: labelled });
     // Part of a word ("src=x"), not maths. Checked here and not with a look-behind in the
     // pattern, which older iPhones (before iOS 16.4) can't read at all.
     else if (maths !== undefined && /[a-zA-Z\d]/.test(line[match.index - 1] ?? '')) push('text', whole);
     else {
-      // A sentence's own full stop or comma stays with the sentence, not with the number or link.
+      // A sentence's own full stop or comma stays with the sentence, not with the number or link,
+      // and so does a closing bracket the address didn't open.
       const run = link ?? maths;
       let end = run.length;
-      while (end > 0 && (run[end - 1] === '.' || run[end - 1] === ',')) end--;
-      push('ltr', run.slice(0, end));
+      while (end > 0 && (run[end - 1] === '.' || run[end - 1] === ',' || (link !== undefined && run[end - 1] === ')' && !run.slice(0, end - 1).includes('(')))) end--;
+      if (link !== undefined) {
+        const url = run.slice(0, end);
+        if (url.length > 'https://'.length) parts.push({ kind: 'link', text: url, url });
+        else push('text', url);
+      } else push('ltr', run.slice(0, end));
       push('text', run.slice(end));
     }
   }
@@ -119,9 +133,14 @@ export function parseAnswer(text: string): Block[] {
   return blocks;
 }
 
+/** A part as plain text: a labelled link keeps its address, after the label. */
+function partText(part: Inline): string {
+  return part.kind === 'link' && part.text !== part.url ? `${part.text} (${part.url})` : part.text;
+}
+
 /** The answer as plain text for "העתקה": without the markdown signs. */
 export function plainText(text: string): string {
   return parseAnswer(text)
-    .map((block) => (block.kind === 'code' ? block.text : block.parts.map((part) => part.text).join('')))
+    .map((block) => (block.kind === 'code' ? block.text : block.parts.map(partText).join('')))
     .join('\n');
 }

@@ -20,9 +20,23 @@ describe('parseInline', () => {
     expect(kinds('בשנת 2026 היו 3 חתולים')).toEqual(['text:בשנת 2026 היו 3 חתולים']);
   });
 
-  it('marks bold and code, and shows a link as left-to-right text', () => {
+  it('marks bold and code, and a bare address as a link without the sentence\'s full stop', () => {
     expect(kinds('התשובה היא **7/8**, נכון?')).toEqual(['text:התשובה היא ', 'bold:7/8', 'text:, נכון?']);
-    expect(kinds('ראי https://example.com/a?b=1. וגם `print(1)`')).toEqual(['text:ראי ', 'ltr:https://example.com/a?b=1', 'text:. וגם ', 'code:print(1)']);
+    expect(kinds('ראי https://example.com/a?b=1. וגם `print(1)`')).toEqual(['text:ראי ', 'link:https://example.com/a?b=1', 'text:. וגם ', 'code:print(1)']);
+  });
+
+  it('reads a markdown link as its label and its address', () => {
+    expect(parseInline('לחצי [כאן לחיפוש](https://www.google.com/search?q=x+y) עכשיו')).toEqual([
+      { kind: 'text', text: 'לחצי ' },
+      { kind: 'link', text: 'כאן לחיפוש', url: 'https://www.google.com/search?q=x+y' },
+      { kind: 'text', text: ' עכשיו' },
+    ]);
+  });
+
+  it('leaves a closing bracket the address did not open with the sentence, and keeps one it did', () => {
+    expect(kinds('(ראי https://a.com/x).')).toEqual(['text:(ראי ', 'link:https://a.com/x', 'text:).']);
+    expect(kinds('https://en.wikipedia.org/wiki/Cat_(disambiguation)')).toEqual(['link:https://en.wikipedia.org/wiki/Cat_(disambiguation)']);
+    expect(kinds('https://')).toEqual(['text:https://']);
   });
 
   it('gives back text it has nothing to say about, also when it is empty', () => {
@@ -93,6 +107,10 @@ describe('a hostile or broken answer', () => {
 });
 
 describe('plainText', () => {
+  it('copies a labelled link with its address', () => {
+    expect(plainText('ראי [כאן](https://a.com/x) ו-https://b.com')).toBe('ראי כאן (https://a.com/x) ו-https://b.com');
+  });
+
   it('is the answer without the markdown signs, for copying', () => {
     expect(plainText('**מודגש** ו`קוד`\n```\nx=1\n```\n## כותרת')).toBe('מודגש וקוד\nx=1\nכותרת');
   });
