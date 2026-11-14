@@ -27,7 +27,7 @@ export interface ModelInfo {
   uncensored: boolean;
   /** Runs in a trusted execution environment that can be attested. */
   tee: boolean;
-  /** Supports end-to-end encryption. The app itself makes ordinary calls. */
+  /** Supports end-to-end encryption (`supportsE2EE`): saved with the choice, and the app then encrypts its chat calls (src/ai/e2ee.ts). */
   e2ee: boolean;
   /** Can search the web: what search mode needs. */
   webSearch: boolean;

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AiErrorReason } from '../ai/providers';
 import { parentMessage, waitText } from './parentMessages';
 
-const REASONS: AiErrorReason[] = ['unauthorized', 'no-credit', 'rate-limited', 'bad-request', 'provider-down', 'refused', 'network', 'timeout', 'cancelled', 'bad-response'];
+const REASONS: AiErrorReason[] = ['unauthorized', 'no-credit', 'rate-limited', 'bad-request', 'provider-down', 'refused', 'network', 'timeout', 'cancelled', 'not-verified', 'bad-response'];
 
 describe('what the parent is told', () => {
   it('has a Hebrew line for every way a call can fail', () => {
@@ -14,6 +14,8 @@ describe('what the parent is told', () => {
     expect(parentMessage('no-credit')).toContain('היתרה');
     expect(parentMessage('bad-request')).toContain('שם המודל');
     expect(parentMessage('network')).toContain('האינטרנט');
+    expect(parentMessage('not-verified')).toContain('attestation');
+    expect(parentMessage('not-verified')).toContain('לא נשלחה');
   });
 
   it('says how long a lock lasts in seconds or minutes, rounded up', () => {

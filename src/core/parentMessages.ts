@@ -19,6 +19,8 @@ export function parentMessage(reason: AiErrorReason): string {
       return 'הספק לא ענה בזמן.';
     case 'bad-response':
       return 'התקבלה תשובה לא צפויה מהספק.';
+    case 'not-verified':
+      return 'לא הצלחנו לאמת שהמודל רץ בסביבה מוגנת (attestation), ולכן ההודעה לא נשלחה.';
     default:
       return 'הבקשה לא הושלמה.';
   }

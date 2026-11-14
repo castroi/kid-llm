@@ -1,4 +1,5 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
+import { attestationNonce, decryptPiece, encryptFor, looksEncrypted, modelKeyFrom, newClientKeys, quoteIsNotDebug, wipe } from './e2ee';
 import { dataUrl, SENT_FILE_NAMES, type ChatFile } from './files';
 import { sanitizeModels, type ModelInfo, type ModelKind } from './models';
 import { sanitizeSources, type Source } from './sources';
@@ -26,7 +27,8 @@ export type AiErrorReason =
   | 'network' // no answer, or the connection dropped: offline, or blocked for web pages (CORS)
   | 'timeout'
   | 'cancelled' // she pressed "עצירה"
-  | 'bad-response'; // an answer with no text, or far too long
+  | 'not-verified' // end-to-end encryption: the enclave's attestation didn't pass, so nothing of hers was sent
+  | 'bad-response'; // an answer with no text, far too long, or that could not be decrypted
 
 export class AiError extends Error {
   constructor(
@@ -64,6 +66,12 @@ export interface ChatCall {
   fetch: FetchLike;
   /** Search mode: the provider looks the question up on the web before it answers. */
   webSearch: boolean;
+  /**
+   * End-to-end encryption (src/ai/e2ee.ts): the enclave's attestation is checked first, the
+   * system and user messages leave the phone encrypted, and the answer is decrypted here.
+   * Never together with `webSearch` or a file (send.ts decides).
+   */
+  e2ee: boolean;
   /** Called with each piece of the answer as it arrives. */
   onDelta: (text: string) => void;
   /** Called whenever the provider sends anything, also while a model thinks before it writes. */
@@ -235,7 +243,7 @@ interface StreamChunk {
  * Reads a streamed chat answer in the OpenAI-compatible format: one JSON chunk per
  * "data:" line with the next piece of text, then "data: [DONE]".
  */
-async function readChatStream(response: Response, { apiKey, signal, webSearch, onDelta, onAlive }: ChatCall): Promise<ChatResult> {
+async function readChatStream(response: Response, { apiKey, signal, webSearch, onDelta, onAlive }: ChatCall, decrypt?: (content: string) => string): Promise<ChatResult> {
   if (!response.body) throw new AiError('bad-response', 'no answer body');
   let text = '';
   let finishReason: string | null = null;
@@ -260,7 +268,8 @@ async function readChatStream(response: Response, { apiKey, signal, webSearch, o
       if (webSearch && sources.length === 0) sources = sanitizeSources(chunk?.venice_parameters?.web_search_citations);
       const choice = chunk?.choices?.[0];
       if (typeof choice?.finish_reason === 'string') finishReason = choice.finish_reason;
-      const delta = choice?.delta?.content;
+      const content = choice?.delta?.content;
+      const delta = typeof content === 'string' && content && decrypt ? decrypt(content) : content;
       if (typeof delta === 'string' && delta) {
         text += delta;
         if (text.length > MAX_ANSWER_CHARS) throw new AiError('bad-response', 'answer too long');
@@ -297,8 +306,126 @@ function veniceMessage({ role, content, file }: ChatMessage): unknown {
   return { role, content: [{ type: 'text', text: content }, part] };
 }
 
+/** An attestation is one JSON answer with a TDX quote and maybe GPU evidence; more than this isn't downloaded. */
+export const MAX_ATTESTATION_BODY_CHARS = 1024 * 1024;
+
+/**
+ * Asks Venice for the enclave's attestation for `model`, with a fresh 32-byte nonce, and
+ * makes the checks the docs list: Venice's own verification passed, the nonce came back,
+ * it is the model asked for, the TDX quote is not in debug mode, and the model's key is a
+ * valid point. Anything missing or unreadable fails: then nothing of hers is sent.
+ * What this does NOT prove: all of it is Venice's own answer. Intel's signature on the quote
+ * (DCAP) and the key's binding to the quote (REPORTDATA) are not checked, so a provider that
+ * lied could hand over a key of its own. Returns the model's key, checked and as given.
+ * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models#step-3-fetch-and-verify-tee-attestation
+ */
+async function attest(model: string, apiKey: string, signal: AbortSignal, fetchFn: FetchLike): Promise<{ key: string; asGiven: string }> {
+  const nonce = attestationNonce();
+  const url = `${AI_PROVIDERS.venice.endpoints.attestation}?model=${encodeURIComponent(model)}&nonce=${nonce}`;
+  const response = await call(fetchFn, url, { method: 'GET', headers: headers(apiKey, false), signal });
+  if (!response.ok) throw await failure(response, apiKey);
+  let text: string;
+  try {
+    text = await readLimitedText(response, MAX_ATTESTATION_BODY_CHARS);
+  } catch (err) {
+    if (signal.aborted) throw err; // send.ts tells a timeout from a stop
+    throw new AiError('network', errorName(err));
+  }
+  if (text.length > MAX_ATTESTATION_BODY_CHARS) throw new AiError('not-verified', 'attestation too long');
+  let report: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+    report = parsed as Record<string, unknown>;
+  } catch {
+    throw new AiError('not-verified', 'attestation unreadable');
+  }
+  if (report.verified !== true) throw new AiError('not-verified', 'attestation not verified by the provider');
+  if (typeof report.nonce !== 'string' || report.nonce.toLowerCase() !== nonce) throw new AiError('not-verified', 'attestation nonce mismatch');
+  // In any letter case: a name typed by hand may differ from the provider's in case only.
+  if (typeof report.model !== 'string' || report.model.toLowerCase() !== model.toLowerCase()) throw new AiError('not-verified', 'attestation is for another model');
+  if (!quoteIsNotDebug(report.intel_quote)) throw new AiError('not-verified', 'enclave in debug mode, or no readable TDX quote');
+  const given = report.signing_key ?? report.signing_public_key;
+  const key = modelKeyFrom(given);
+  if (!key || typeof given !== 'string') throw new AiError('not-verified', 'no usable model key in the attestation');
+  // The header carries the key as the attestation gave it, as in the docs' example; it is hex, so it is safe in a header.
+  return { key, asGiven: given };
+}
+
+/** The three headers that switch E2EE on, and nothing in a system or user message that isn't encrypted. */
+export function encryptedRequestProblem(headers: Record<string, string>, messages: readonly { role: string; content: unknown }[]): string | null {
+  if (!/^04[0-9a-f]{128}$/.test(headers['X-Venice-TEE-Client-Pub-Key'] ?? '')) return 'no valid client key header';
+  if (modelKeyFrom(headers['X-Venice-TEE-Model-Pub-Key']) === null) return 'no valid model key header';
+  if (headers['X-Venice-TEE-Signing-Algo'] !== 'ecdsa') return 'no signing algorithm header';
+  for (const { role, content } of messages) {
+    if (role === 'assistant') continue;
+    if (typeof content !== 'string' || !looksEncrypted(content)) return `a ${role} message that is not encrypted`;
+  }
+  return null;
+}
+
+/**
+ * The same chat call, end-to-end encrypted: a key pair for this call only, the enclave's
+ * attestation checked, every system and user message encrypted to the model's key, the
+ * three X-Venice-TEE headers, and every piece of the answer decrypted. A piece that is
+ * not encrypted, or that doesn't decrypt, ends the call: with E2EE on, a plain piece was
+ * not written by the holder of the attested key.
+ * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models#e2ee-models
+ */
+async function streamChatE2ee(chat: ChatCall): Promise<ChatResult> {
+  const { model, systemPrompt, messages, apiKey, signal, fetch } = chat;
+  if (chat.webSearch || messages.some((message) => message.file !== undefined)) {
+    // send.ts never asks for this; a file or a search would need the plain text outside the enclave.
+    throw new AiError('bad-request', 'web search and files are not sent end-to-end encrypted');
+  }
+  const keys = newClientKeys();
+  try {
+    const modelKey = await attest(model, apiKey, signal, fetch);
+    // Stopped (or timed out) while the attestation was checked: her messages are not sent.
+    if (signal.aborted) throw new DOMException('The answer was stopped', 'AbortError');
+    // The docs: only system and user messages are encrypted; earlier answers go as they are.
+    const sent = [...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []), ...messages.map(({ role, content }) => ({ role, content }))].map((message) =>
+      message.role === 'assistant' ? message : { role: message.role, content: encryptFor(modelKey.key, message.content) },
+    );
+    const sentHeaders: Record<string, string> = {
+      ...headers(apiKey, true),
+      'X-Venice-TEE-Client-Pub-Key': keys.publicKeyHex,
+      'X-Venice-TEE-Model-Pub-Key': modelKey.asGiven,
+      'X-Venice-TEE-Signing-Algo': 'ecdsa',
+    };
+    // Checked once more just before it leaves: without these headers Venice would not treat the call as E2EE.
+    const problem = encryptedRequestProblem(sentHeaders, sent);
+    if (problem) throw new AiError('bad-request', problem);
+    const init: RequestInit = {
+      method: 'POST',
+      headers: sentHeaders,
+      body: JSON.stringify({
+        model,
+        messages: sent,
+        stream: true,
+        venice_parameters: { include_venice_system_prompt: false },
+      }),
+      signal,
+    };
+    const response = await call(fetch, AI_PROVIDERS.venice.endpoints.chat, init);
+    if (!response.ok) throw await failure(response, apiKey);
+    return await readChatStream(response, chat, (content) => {
+      if (!looksEncrypted(content)) throw new AiError('bad-response', 'an unencrypted piece in an encrypted answer');
+      try {
+        return decryptPiece(keys.secretKey, content);
+      } catch {
+        // The docs: don't show decryption errors; the reason is enough.
+        throw new AiError('bad-response', 'a piece of the answer could not be decrypted');
+      }
+    });
+  } finally {
+    wipe(keys);
+  }
+}
+
 const venice: ProviderAdapter = {
   async streamChat(chat) {
+    if (chat.e2ee) return streamChatE2ee(chat);
     const { model, systemPrompt, messages, apiKey, signal, fetch, webSearch } = chat;
     const init: RequestInit = {
       method: 'POST',

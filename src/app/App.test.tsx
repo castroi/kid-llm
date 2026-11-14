@@ -176,6 +176,21 @@ describe('chatting', () => {
     ]);
   });
 
+  it("asks for end-to-end encryption for a model the provider's list tagged E2EE", async () => {
+    const { requests } = open({ settings: { e2ee: ['model-chat'] } });
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    expect(requests[0]).toMatchObject({ model: 'model-chat', e2ee: true });
+  });
+
+  it('never asks for end-to-end encryption by a model name alone', async () => {
+    const { requests } = open({ settings: { models: { ...SETTINGS.models, chat: 'e2ee-looking-name' } } });
+    await say('שלום');
+    await screen.findByText('היי לך!');
+    expect(requests[0].model).toBe('e2ee-looking-name');
+    expect(requests[0]).not.toHaveProperty('e2ee');
+  });
+
   it('never sends her name to the provider', async () => {
     const { requests } = open();
     await say('שלום');

@@ -9,6 +9,7 @@ import {
   MAX_NAME_CHARS,
   MAX_SYSTEM_PROMPT_CHARS,
   fileModelFor,
+  isE2ee,
   isUncensored,
   missingFor,
   modelFor,
@@ -243,5 +244,31 @@ describe('uncensored models', () => {
     expect(sanitizeSettings({ ...SET_UP, uncensored: 'model-a' })).not.toHaveProperty('uncensored');
     expect(sanitizeSettings({ ...SET_UP, uncensored: [7, null, {}] })).not.toHaveProperty('uncensored');
     expect(sanitizeSettings(SET_UP)).not.toHaveProperty('uncensored');
+  });
+});
+
+describe('end-to-end encrypted models', () => {
+  const TAGGED: Settings = { ...SET_UP, models: { ...SET_UP.models, chat: 'private-model-1' }, e2ee: ['private-model-1'] };
+
+  it('knows one only by the tag saved with it, never by its name', () => {
+    expect(isE2ee('private-model-1', TAGGED)).toBe(true);
+    expect(isE2ee('model-b', TAGGED)).toBe(false);
+    expect(isE2ee('e2ee-qwen3-6-35b-a3b', SET_UP)).toBe(false);
+    expect(isE2ee('', TAGGED)).toBe(false);
+  });
+
+  it('keeps the tags through saving, only for models that are chosen, each once', () => {
+    const storage = memory();
+    saveSettings({ ...TAGGED, e2ee: ['private-model-1', ' private-model-1 ', 'not-chosen'] }, storage);
+    expect(loadSettings(storage).e2ee).toEqual(['private-model-1']);
+    expect(sanitizeSettings({ ...SET_UP, e2ee: ['not-chosen'] })).not.toHaveProperty('e2ee');
+    expect(sanitizeSettings({ ...SET_UP, e2ee: 'model-a' })).not.toHaveProperty('e2ee');
+    expect(sanitizeSettings({ ...SET_UP, e2ee: [7, null, {}] })).not.toHaveProperty('e2ee');
+    expect(sanitizeSettings(SET_UP)).not.toHaveProperty('e2ee');
+  });
+
+  it('is not a reason to give an uncensored model to a child', () => {
+    const both: Settings = { ...TAGGED, uncensored: ['private-model-1'] };
+    expect(modelFor('chat', both)).toBe('');
   });
 });
