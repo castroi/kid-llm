@@ -476,6 +476,37 @@ describe("a parent's own use", () => {
     expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
   });
 
+  it("makes an address the model wrote a link, shown by its site's name, only in a parent's own use", async () => {
+    const text = 'חיפוש: [לחץ כאן](https://www.google.com/search?q=18V) או http://plain.example.com';
+    open({ settings: { parentUse: true }, send: answers(text) });
+    await say('שלום');
+    const link = await screen.findByRole('link', { name: 'google.com' });
+    expect(link).toHaveAttribute('href', 'https://www.google.com/search?q=18V');
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer');
+    expect(link).toHaveAttribute('referrerpolicy', 'no-referrer');
+    // Not https: stays text.
+    expect(screen.getAllByRole('link')).toHaveLength(1);
+    expect(screen.getByText('http://plain.example.com')).toBeInTheDocument();
+  });
+
+  it('shows only the real site when the label is itself an address', async () => {
+    open({ settings: { parentUse: true }, send: answers('[https://google.com](https://evil.example.com/x) [www.google.com](https://bad.example.com) [לחפש ב-google.com](https://worse.example.com) [לאתר google．com.](https://worst.example.com)') });
+    await say('שלום');
+    expect(await screen.findByRole('link', { name: 'evil.example.com' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'bad.example.com' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'worse.example.com' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'worst.example.com' })).toBeInTheDocument();
+    expect(screen.queryByText(/google/)).not.toBeInTheDocument();
+  });
+
+  it('never makes the model\'s address a link for her', async () => {
+    open({ send: answers('[לחץ כאן](https://www.google.com/search?q=18V)') });
+    await say('שלום');
+    expect(await screen.findByText('https://www.google.com/search?q=18V')).toBeInTheDocument();
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
+  });
+
   it('asks again without the child baseline on "try again" too', async () => {
     const { requests } = open({ settings: { parentUse: true } });
     await say('שלום');
