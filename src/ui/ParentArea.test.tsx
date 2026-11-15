@@ -705,6 +705,9 @@ describe('the model picker', () => {
     await openWithList();
     const note = screen.getByText(/E2EE: בשיחה ובחשבון ההודעות מוצפנות באייפון/);
     expect(note).toHaveTextContent('אם הבדיקה נכשלת דבר לא נשלח');
+    // The key is one that Intel hardware vouched for; the note doesn't say whose it is.
+    expect(note).toHaveTextContent('מוצפנות באייפון למפתח שסביבה מוגנת בחומרה של Intel אישרה');
+    expect(note).not.toHaveTextContent('למפתח של סביבה מוגנת');
     // What the app checks itself: Intel hardware signed the attestation, and the key is in it.
     expect(note).toHaveTextContent('שחומרה של Intel חתמה עליו, ושהמפתח שאליו מצפינים רשום בתוכו');
     // It doesn't claim more than the check proves: which software runs in the enclave, and
