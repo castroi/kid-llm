@@ -181,9 +181,9 @@ export function quoteIsNotDebug(quote: unknown): boolean {
  * REPORTDATA field"; the layout is the one two independent clients check
  * (github.com/elkimek/venice-e2ee, github.com/jooray/venice-e2ee-proxy).
  *
- * This means something only for a quote whose signature passed (tdxQuote.ts): then the
- * enclave that Intel's hardware vouches for is the one that put this key there, for this
- * call. `modelKeyHex` is the key as `modelKeyFrom` gives it; `nonceHex` is 64 hex characters.
+ * This means something only for a quote whose signature passed (tdxQuote.ts): then a real
+ * Intel TDX machine put this key there, for this call. Which machine, running what, it does
+ * not say: the quote's measurements are not compared with anything. `modelKeyHex` is the key as `modelKeyFrom` gives it; `nonceHex` is 64 hex characters.
  */
 export function quoteNamesKey(reportData: Uint8Array, modelKeyHex: string, nonceHex: string): boolean {
   if (reportData.length !== 64 || modelKeyFrom(modelKeyHex) !== modelKeyHex || nonceHex.length !== ATTESTATION_NONCE_BYTES * 2 || !HEX.test(nonceHex)) return false;

@@ -316,12 +316,14 @@ export const MAX_ATTESTATION_BODY_CHARS = 1024 * 1024;
  * it is the model asked for, the TDX quote is not in debug mode, and the model's key is a
  * valid point. Then two checks that don't rest on Venice's word: Intel hardware signed the
  * quote (tdxQuote.ts), and the quote itself holds this model key and this call's nonce
- * (e2ee.ts, `quoteNamesKey`). So a key the provider made up, or an old quote, fails.
+ * (e2ee.ts, `quoteNamesKey`). So a key that no Intel TDX machine vouched for, or a quote
+ * made for another call, fails.
  * Anything missing or unreadable fails: then nothing of hers is sent.
  * What this does NOT prove: which software runs in the enclave (the quote's measurements
  * are not compared with anything), that the processor's firmware is up to date or its
  * certificate not revoked, and the NVIDIA GPU evidence. A provider that runs other software
- * on a real Intel TDX machine passes. Returns the model's key, checked and as given.
+ * on a real Intel TDX machine passes, and so does a key it made itself and had such a
+ * machine put in a quote. Returns the model's key, checked and as given.
  * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models#step-3-fetch-and-verify-tee-attestation
  */
 async function attest(model: string, apiKey: string, signal: AbortSignal, fetchFn: FetchLike): Promise<{ key: string; asGiven: string }> {
