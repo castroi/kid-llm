@@ -58,15 +58,39 @@ export const FILE_BASELINE_PARENT = [
   'Do not identify people in a picture and do not guess who or where they are.',
 ].join(' ');
 
+/** The date line is always in Israel time, whatever time zone the phone is set to. */
+export const DATE_TIME_ZONE = 'Asia/Jerusalem';
+
+/** The second sentence of the date line; the parent area shows it word for word. */
+export const DATE_LINE_RULE = 'Work out relative dates such as yesterday and tomorrow from this date, not from a date that appears anywhere else.';
+
+/**
+ * Today's date, sent with every chat call, for a child and in a parent's own use. A model
+ * has no clock (and the provider's own system prompt, which could carry the date, is
+ * switched off), so without this line it takes "today" from its training or from a web
+ * page a search found. In English, with the month as a name and as a number, so the day
+ * and the month can't be read the wrong way round.
+ */
+export function dateLineFor(now: Date): string {
+  const part = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat('en-GB', { timeZone: DATE_TIME_ZONE, ...options }).format(now);
+  const day = part({ day: 'numeric' });
+  const year = part({ year: 'numeric' });
+  return `Today is ${part({ weekday: 'long' })}, ${day} ${part({ month: 'long' })} ${year} (day ${day}, month ${part({ month: 'numeric' })}, year ${year}), Israel time. ${DATE_LINE_RULE}`;
+}
+
 /**
  * The system message for a call. For a child (`kidUse`, the default): the baseline (with
  * the search lines in search mode, the file lines with a file), then what the parent wrote.
  * For a parent's own use: no child baseline, only the lines about web text and files when
- * they apply, then what the parent wrote; that can be nothing at all, and then it is ''.
+ * they apply, then what the parent wrote. With `now` (every call the app makes), today's
+ * date closes the built-in lines; without it, a parent's own use with nothing written is ''.
  */
-export function systemPromptFor(parentPrompt: string, webSearch = false, withFile = false, kidUse = true): string {
-  const fixed = kidUse
-    ? [BASELINE_PROMPT, ...(webSearch ? [SEARCH_BASELINE] : []), ...(withFile ? [FILE_BASELINE] : [])]
-    : [...(webSearch ? [SEARCH_BASELINE_PARENT] : []), ...(withFile ? [FILE_BASELINE_PARENT] : [])];
+export function systemPromptFor(parentPrompt: string, webSearch = false, withFile = false, kidUse = true, now?: Date): string {
+  const fixed = [
+    ...(kidUse
+      ? [BASELINE_PROMPT, ...(webSearch ? [SEARCH_BASELINE] : []), ...(withFile ? [FILE_BASELINE] : [])]
+      : [...(webSearch ? [SEARCH_BASELINE_PARENT] : []), ...(withFile ? [FILE_BASELINE_PARENT] : [])]),
+    ...(now ? [dateLineFor(now)] : []),
+  ];
   return [fixed.join(' '), parentPrompt.trim()].filter((part) => part !== '').join('\n\n');
 }

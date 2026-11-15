@@ -10,6 +10,7 @@ import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, t
  * The provider keeps nothing between calls: every call carries the whole conversation
  * (`messages`). The baseline instructions (src/ai/baseline.ts) go first, then the parent's;
  * the child baseline is left out only when a parent switched the app to their own use.
+ * Today's date goes with every call, since a model has no clock.
  */
 
 /** Nothing from the provider for this long means the call hangs. A long answer is fine: everything it sends restarts the clock. */
@@ -113,6 +114,8 @@ export interface ChatRequest {
   /** Her "עצירה". The pieces already given to onDelta stay hers to keep. */
   signal?: AbortSignal;
   fetch?: FetchLike;
+  /** The moment of the call, for the date line of the instructions; the phone's clock unless a test sets it. */
+  now?: Date;
   idleTimeoutMs?: number;
   noTextTimeoutMs?: number;
 }
@@ -130,7 +133,7 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
-      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true, withFile, req.kidUse !== false),
+      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true, withFile, req.kidUse !== false, req.now ?? new Date()),
       messages,
       apiKey,
       webSearch: req.webSearch === true,

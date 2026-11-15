@@ -58,7 +58,7 @@ export interface ChatMessage {
 
 export interface ChatCall {
   model: string;
-  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first. Empty only in a parent's own use with nothing written: then no system message is sent. */
+  /** The baseline and the parent's instructions (src/ai/baseline.ts); sent first. From `sendChat` it always holds today's date at least; when it is empty, no system message is sent. */
   systemPrompt: string;
   /** The whole conversation so far, oldest first, ending with her new message. */
   messages: ChatMessage[];
