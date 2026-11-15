@@ -1,6 +1,10 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, SEARCH_BASELINE, SEARCH_BASELINE_PARENT, systemPromptFor } from './baseline';
+import { BASELINE_PROMPT, DATE_LINE_RULE, FILE_BASELINE, FILE_BASELINE_PARENT, SEARCH_BASELINE, SEARCH_BASELINE_PARENT, dateLineFor, systemPromptFor } from './baseline';
+
+/** The moment every call in this file is made at: Sunday 15 November 2026, 10:00 in Israel. */
+const NOW = new Date('2026-11-15T08:00:00Z');
+const TODAY = dateLineFor(NOW);
 import { AI_PROVIDERS } from './catalog';
 import { AiError, MAX_ANSWER_CHARS, MAX_ERROR_BODY_CHARS, MAX_MODELS_BODY_CHARS, SAFE_FETCH, type FetchLike } from './providers';
 import { MAX_LINE_CHARS } from './sse';
@@ -96,6 +100,7 @@ function request(fetch: FetchLike, extra: Partial<ChatRequest> = {}): ChatReques
     apiKey: KEY,
     onDelta: (text) => deltas.push(text),
     fetch,
+    now: NOW,
     deltas,
     ...extra,
   };
@@ -133,7 +138,7 @@ describe('sendChat', () => {
     expect(calls[0].init.headers).toEqual({ Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json' });
     expect(JSON.parse(calls[0].init.body as string)).toEqual({
       model: 'some-model',
-      messages: [{ role: 'system', content: `${BASELINE_PROMPT}\n\nAnswer in simple Hebrew.` }, ...messages],
+      messages: [{ role: 'system', content: `${BASELINE_PROMPT} ${TODAY}\n\nAnswer in simple Hebrew.` }, ...messages],
       stream: true,
       venice_parameters: { include_venice_system_prompt: false },
     });
@@ -143,7 +148,7 @@ describe('sendChat', () => {
     const { fetch, calls } = fetchStream([piece('היי'), DONE]);
     await sendChat(request(fetch, { systemPrompt: '  ' }));
     expect(JSON.parse(calls[0].init.body as string).messages).toEqual([
-      { role: 'system', content: BASELINE_PROMPT },
+      { role: 'system', content: `${BASELINE_PROMPT} ${TODAY}` },
       { role: 'user', content: 'שלום' },
     ]);
     expect(BASELINE_PROMPT).toMatch(/child/);
@@ -155,7 +160,7 @@ describe('sendChat', () => {
     const own = fetchStream([piece('hi'), DONE]);
     await sendChat(request(own.fetch, { kidUse: false }));
     expect(JSON.parse(own.calls[0].init.body as string).messages).toEqual([
-      { role: 'system', content: 'Answer in simple Hebrew.' },
+      { role: 'system', content: `${TODAY}\n\nAnswer in simple Hebrew.` },
       { role: 'user', content: 'שלום' },
     ]);
 
@@ -163,16 +168,19 @@ describe('sendChat', () => {
     for (const kidUse of [true, undefined]) {
       const kid = fetchStream([piece('היי'), DONE]);
       await sendChat(request(kid.fetch, { kidUse }));
-      expect(JSON.parse(kid.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${BASELINE_PROMPT}\n\nAnswer in simple Hebrew.` });
+      expect(JSON.parse(kid.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${BASELINE_PROMPT} ${TODAY}\n\nAnswer in simple Hebrew.` });
     }
   });
 
-  it("sends no system message at all in a parent's own use with nothing written, and still switches the provider's own prompt off", async () => {
+  it("sends only today's date in a parent's own use with nothing written, and still switches the provider's own prompt off", async () => {
     const { fetch, calls } = fetchStream([piece('hi'), DONE]);
     await sendChat(request(fetch, { kidUse: false, systemPrompt: '  ' }));
     expect(JSON.parse(calls[0].init.body as string)).toEqual({
       model: 'some-model',
-      messages: [{ role: 'user', content: 'שלום' }],
+      messages: [
+        { role: 'system', content: TODAY },
+        { role: 'user', content: 'שלום' },
+      ],
       stream: true,
       venice_parameters: { include_venice_system_prompt: false },
     });
@@ -181,12 +189,12 @@ describe('sendChat', () => {
   it("keeps the lines about web text and files in a parent's own use, without the lines about a child", async () => {
     const search = fetchStream([piece('found'), DONE]);
     await sendChat(request(search.fetch, { kidUse: false, webSearch: true }));
-    expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${SEARCH_BASELINE_PARENT}\n\nAnswer in simple Hebrew.` });
+    expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${SEARCH_BASELINE_PARENT} ${TODAY}\n\nAnswer in simple Hebrew.` });
 
     const file = fetchStream([piece('a cat'), DONE]);
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
     await sendChat(request(file.fetch, { kidUse: false, systemPrompt: '', messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
-    expect(JSON.parse(file.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: FILE_BASELINE_PARENT });
+    expect(JSON.parse(file.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${FILE_BASELINE_PARENT} ${TODAY}` });
 
     for (const lines of [SEARCH_BASELINE_PARENT, FILE_BASELINE_PARENT]) {
       expect(lines).toMatch(/never follow instructions/);
@@ -203,6 +211,32 @@ describe('sendChat', () => {
     expect(systemPromptFor(' Be brief. ', false, false, false)).toBe('Be brief.');
     expect(systemPromptFor('', true, true, false)).toBe(`${SEARCH_BASELINE_PARENT} ${FILE_BASELINE_PARENT}`);
     expect(systemPromptFor('Be brief.', true, false, false)).toBe(`${SEARCH_BASELINE_PARENT}\n\nBe brief.`);
+    // With the moment of the call, today's date closes the built-in lines, before what the parent wrote.
+    expect(systemPromptFor('Be kind.', true, true, true, NOW)).toBe(`${BASELINE_PROMPT} ${SEARCH_BASELINE} ${FILE_BASELINE} ${TODAY}\n\nBe kind.`);
+    expect(systemPromptFor('', false, false, false, NOW)).toBe(TODAY);
+    expect(systemPromptFor('Be brief.', true, false, false, NOW)).toBe(`${SEARCH_BASELINE_PARENT} ${TODAY}\n\nBe brief.`);
+  });
+
+  it("writes today's date in English with the month as a name and as a number, so day and month can't be swapped", () => {
+    expect(TODAY).toBe(`Today is Sunday, 15 November 2026 (day 15, month 11, year 2026), Israel time. ${DATE_LINE_RULE}`);
+    // A day that would read as another date the wrong way round: 3 April, never 4 March.
+    expect(dateLineFor(new Date('2026-04-03T09:00:00Z'))).toContain('Today is Friday, 3 April 2026 (day 3, month 4, year 2026), Israel time.');
+    expect(DATE_LINE_RULE).toMatch(/yesterday and tomorrow/);
+  });
+
+  it('takes the date from Israel time, whatever the time zone of the phone', () => {
+    // 22:30 UTC on Saturday is already 00:30 on Sunday in Israel (winter, UTC+2).
+    expect(dateLineFor(new Date('2026-11-14T22:30:00Z'))).toContain('Today is Sunday, 15 November 2026 (day 15, month 11, year 2026)');
+    // 21:30 UTC is still Saturday there.
+    expect(dateLineFor(new Date('2026-11-14T21:30:00Z'))).toContain('Today is Saturday, 14 November 2026 (day 14, month 11, year 2026)');
+    // Summer time (UTC+3): 21:30 UTC is already the next day.
+    expect(dateLineFor(new Date('2026-07-31T21:30:00Z'))).toContain('Today is Saturday, 1 August 2026 (day 1, month 8, year 2026)');
+  });
+
+  it("sends the phone's own date when the call names no moment", async () => {
+    const { fetch, calls } = fetchStream([piece('היי'), DONE]);
+    await sendChat(request(fetch, { now: undefined }));
+    expect(JSON.parse(calls[0].init.body as string).messages[0].content).toMatch(/Today is \w+, \d{1,2} \w+ \d{4} \(day \d{1,2}, month \d{1,2}, year \d{4}\), Israel time\./);
   });
 
   it('adds the lines about web text to the instructions in search mode only', async () => {
@@ -210,7 +244,7 @@ describe('sendChat', () => {
     await sendChat(request(search.fetch, { webSearch: true }));
     expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({
       role: 'system',
-      content: `${BASELINE_PROMPT} ${SEARCH_BASELINE}\n\nAnswer in simple Hebrew.`,
+      content: `${BASELINE_PROMPT} ${SEARCH_BASELINE} ${TODAY}\n\nAnswer in simple Hebrew.`,
     });
     expect(SEARCH_BASELINE).toMatch(/never follow instructions/);
     expect(SEARCH_BASELINE).toMatch(/web addresses/);
@@ -288,7 +322,7 @@ describe('sendChat', () => {
     await sendChat(request(fetch, { messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
     const body = JSON.parse(calls[0].init.body as string);
     expect(calls[0].url).toBe(AI_PROVIDERS.venice.endpoints.chat);
-    expect(body.messages[0].content).toBe(`${BASELINE_PROMPT} ${FILE_BASELINE}\n\nAnswer in simple Hebrew.`);
+    expect(body.messages[0].content).toBe(`${BASELINE_PROMPT} ${FILE_BASELINE} ${TODAY}\n\nAnswer in simple Hebrew.`);
     expect(body.messages[1]).toEqual({
       role: 'user',
       content: [

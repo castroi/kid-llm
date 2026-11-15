@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
+import { BASELINE_PROMPT, DATE_LINE_RULE, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
 import type { ModelInfo } from '../ai/models';
 import { AiError } from '../ai/providers';
 import { appVersion } from '../core/version';
@@ -415,6 +415,10 @@ describe('who uses the app', () => {
       expect(shown).toHaveAttribute('dir', 'ltr');
       expect(shown.closest('details')).not.toBeNull();
     }
+    // The date line changes every day; it is shown as it would be sent now.
+    const date = screen.getByText((text) => /^Today is \w+, \d{1,2} \w+ \d{4} \(day \d{1,2}, month \d{1,2}, year \d{4}\), Israel time\. /.test(text) && text.endsWith(DATE_LINE_RULE));
+    expect(date).toHaveAttribute('dir', 'ltr');
+    expect(date.closest('details')).not.toBeNull();
   });
 
   it('is not on the screen before the code is entered', () => {

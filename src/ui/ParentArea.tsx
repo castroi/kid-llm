@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT } from '../ai/baseline';
+import { BASELINE_PROMPT, FILE_BASELINE, FILE_BASELINE_PARENT, IMAGE_BASELINE, SEARCH_BASELINE, SEARCH_BASELINE_PARENT, dateLineFor } from '../ai/baseline';
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
 import { looksUncensored, type ModelInfo } from '../ai/models';
 import { AiError } from '../ai/providers';
@@ -494,7 +494,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             </label>
             {draft.parentUse === true ? (
               <p className="hint warning">
-                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת כאן למטה, ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה. שיחות במצב הזה לא נשמרות באייפון
+                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת כאן למטה והתאריך של היום, ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה. שיחות במצב הזה לא נשמרות באייפון
                 ולא מופיעות ברשימת השיחות שלה, ובמעבר בין המצבים נפתחת שיחה חדשה. ציור נשאר במצב בטוח לילדים, ומגבלת ההודעות היומית חלה גם כאן. המצב הזה לא מסתיים מעצמו: מסך הצ'אט מציג "מצב הורים" עד שהתיבה מסומנת שוב. חשוב לסמן אותה
                 ולשמור לפני שהאייפון חוזר לילדה.
               </p>
@@ -526,6 +526,10 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
               <p className="hint">בלי סימון, עם קובץ מצורף:</p>
               <p className="builtin-text" dir="ltr" lang="en">
                 {FILE_BASELINE_PARENT}
+              </p>
+              <p className="hint">התאריך של היום, לפי שעון ישראל, עם כל הודעה (תמיד, גם בלי סימון). כך זה נשלח עכשיו:</p>
+              <p className="builtin-text" dir="ltr" lang="en">
+                {dateLineFor(new Date())}
               </p>
             </details>
           </div>
