@@ -219,3 +219,46 @@ describe('what the check reads', () => {
     expect(result.ok && bytesToHex(result.reportData)).toBe('01'.repeat(64));
   });
 });
+
+describe("without the browser's cryptography, or with one that misbehaves", () => {
+  /** Runs with something else where `crypto` is, and puts the real one back. */
+  async function withCrypto(standIn: unknown, run: () => Promise<void>): Promise<void> {
+    const real = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', { value: standIn, configurable: true });
+    try {
+      await run();
+    } finally {
+      if (real) Object.defineProperty(globalThis, 'crypto', real);
+    }
+  }
+  const real = globalThis.crypto;
+  const importKey = real.subtle.importKey.bind(real.subtle);
+
+  it('refuses, and says it is the browser, when there is nothing to check signatures with', async () => {
+    const quote = signedQuote();
+    for (const standIn of [undefined, {}, { subtle: {} }]) {
+      await withCrypto(standIn, async () => {
+        expect(await checkQuote(quote, NOW)).toEqual({ ok: false, why: 'this browser can not check signatures' });
+      });
+    }
+    // And the same quote passes once the real one is back.
+    expect((await checkQuote(quote, NOW)).ok).toBe(true);
+  });
+
+  it('refuses when a check fails to run, or answers anything but true', async () => {
+    const quote = signedQuote();
+    const misbehaving: Record<string, unknown>[] = [
+      { importKey, verify: () => Promise.reject(new Error('no')) },
+      { importKey, verify: () => { throw new Error('no'); } },
+      { importKey, verify: () => Promise.resolve('true') },
+      { importKey, verify: () => Promise.resolve(1) },
+      { importKey, verify: () => Promise.resolve(undefined) },
+      { importKey: () => Promise.reject(new Error('no')), verify: () => Promise.resolve(true) },
+    ];
+    for (const subtle of misbehaving) {
+      await withCrypto({ subtle }, async () => {
+        expect(await checkQuote(quote, NOW)).toEqual({ ok: false, why: "the certificate chain does not lead to Intel's root" });
+      });
+    }
+  });
+});

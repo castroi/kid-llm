@@ -257,13 +257,15 @@ const P256_KEY_INFO = hexToBytes('3059301306072a8648ce3d020106082a8648ce3d030107
 async function signedBy(key: Uint8Array, message: Uint8Array, signature: Uint8Array): Promise<boolean> {
   try {
     const imported = await crypto.subtle.importKey('spki', new Uint8Array([...P256_KEY_INFO, ...key]), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
-    return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, imported, new Uint8Array(signature), new Uint8Array(message));
+    return (await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, imported, new Uint8Array(signature), new Uint8Array(message))) === true;
   } catch {
     return false;
   }
 }
 
 async function checked(quote: Uint8Array, now: number): Promise<Uint8Array> {
+  // Said first and in its own words: otherwise the reason would blame the quote for what the phone lacks.
+  if (typeof globalThis.crypto?.subtle?.verify !== 'function') refuse('this browser can not check signatures');
   const body = tdReportAt(quote);
   if (body === null) refuse('not a TDX quote of a known version');
   const header = reader(quote.subarray(0, HEADER_BYTES));
