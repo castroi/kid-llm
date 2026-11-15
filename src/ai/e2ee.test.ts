@@ -1,9 +1,11 @@
 // @vitest-environment node
 import { secp256k1 } from '@noble/curves/secp256k1.js';
+import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { describe, expect, it } from 'vitest';
 import { base64, enclaveDecrypt, enclaveEncrypt, fakeQuote } from '../test/enclave';
-import { attestationNonce, decryptPiece, encryptFor, looksEncrypted, MIN_ENCRYPTED_HEX, modelKeyFrom, newClientKeys, quoteIsNotDebug, wipe } from './e2ee';
+import { reportDataFor } from '../test/quote';
+import { attestationNonce, decryptPiece, encryptFor, looksEncrypted, MIN_ENCRYPTED_HEX, modelKeyFrom, newClientKeys, quoteBytes, quoteIsNotDebug, quoteNamesKey, wipe } from './e2ee';
 
 /**
  * A known answer made with another implementation (pyca/cryptography, as in Venice's Python
@@ -127,5 +129,77 @@ describe('the TDX debug check', () => {
     expect(quoteIsNotDebug('not a quote!')).toBe(false);
     expect(quoteIsNotDebug('A'.repeat(64 * 1024 + 4))).toBe(false);
     for (const value of [undefined, null, 7, {}, '']) expect(quoteIsNotDebug(value)).toBe(false);
+  });
+});
+
+describe("the quote's bytes, from the attestation's text", () => {
+  it('reads hex, hex with 0x, base64 and URL-safe base64, and nothing else', () => {
+    const quote = fakeQuote();
+    for (const text of [bytesToHex(quote), `0x${bytesToHex(quote)}`, base64(quote), base64(quote).replace(/\+/g, '-').replace(/\//g, '_')]) {
+      expect(bytesToHex(quoteBytes(text) ?? new Uint8Array())).toBe(bytesToHex(quote));
+    }
+    expect(quoteBytes('not a quote!')).toBeNull();
+    expect(quoteBytes('A'.repeat(64 * 1024 + 4))).toBeNull();
+  });
+});
+
+describe('the model key and the nonce inside the quote (REPORTDATA)', () => {
+  const key = bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), false));
+  const nonce = attestationNonce();
+
+  it('agrees with a known Ethereum address: the secret key 1 has the address 7e5f…5bdf', () => {
+    // A well-known pair, so the address is not only checked against this project's own code.
+    const one = bytesToHex(secp256k1.getPublicKey(hexToBytes(`${'00'.repeat(31)}01`), false));
+    const reportData = hexToBytes(`7e5f4552091a69125d5dfcb7b8c2659029395bdf${'00'.repeat(12)}${nonce}`);
+    expect(quoteNamesKey(reportData, one, nonce)).toBe(true);
+    expect(bytesToHex(reportDataFor(one, nonce))).toBe(bytesToHex(reportData));
+  });
+
+  it('passes when the quote holds this key and this nonce, as it is or as its SHA-256', () => {
+    expect(quoteNamesKey(reportDataFor(key, nonce), key, nonce)).toBe(true);
+    expect(quoteNamesKey(reportDataFor(key, nonce, true), key, nonce)).toBe(true);
+    // The 12 bytes between them are not read.
+    const filled = reportDataFor(key, nonce);
+    filled.fill(0xff, 20, 32);
+    expect(quoteNamesKey(filled, key, nonce)).toBe(true);
+  });
+
+  it('fails for another key: the one a provider could hand over in place of the enclave\'s', () => {
+    const other = bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), false));
+    expect(quoteNamesKey(reportDataFor(key, nonce), other, nonce)).toBe(false);
+  });
+
+  it('fails for another nonce: a quote made for an earlier call', () => {
+    const earlier = attestationNonce();
+    expect(quoteNamesKey(reportDataFor(key, earlier), key, nonce)).toBe(false);
+    expect(quoteNamesKey(reportDataFor(key, earlier, true), key, nonce)).toBe(false);
+    // The nonce hashed twice, or the SHA-256 of its hex text, is not the nonce.
+    const twice = reportDataFor(key, nonce);
+    twice.set(sha256(sha256(hexToBytes(nonce))), 32);
+    expect(quoteNamesKey(twice, key, nonce)).toBe(false);
+  });
+
+  it('fails with one bit changed in the address or in the nonce', () => {
+    for (const at of [0, 19, 32, 63]) {
+      const changed = reportDataFor(key, nonce);
+      changed[at] ^= 0x01;
+      expect(quoteNamesKey(changed, key, nonce)).toBe(false);
+    }
+  });
+
+  it('fails for anything that is not 64 bytes, a checked key and a 32-byte nonce', () => {
+    const good = reportDataFor(key, nonce);
+    expect(quoteNamesKey(good.slice(0, 63), key, nonce)).toBe(false);
+    expect(quoteNamesKey(new Uint8Array(0), key, nonce)).toBe(false);
+    expect(quoteNamesKey(good, key.slice(2), nonce)).toBe(false);
+    expect(quoteNamesKey(good, key.toUpperCase(), nonce)).toBe(false);
+    expect(quoteNamesKey(good, `04${'1'.repeat(128)}`, nonce)).toBe(false);
+    expect(quoteNamesKey(good, key, nonce.slice(2))).toBe(false);
+    expect(quoteNamesKey(good, key, `${nonce.slice(2)}zz`)).toBe(false);
+    expect(quoteNamesKey(good, key, '')).toBe(false);
+  });
+
+  it('an all-zero REPORTDATA names no key', () => {
+    expect(quoteNamesKey(new Uint8Array(64), key, nonce)).toBe(false);
   });
 });

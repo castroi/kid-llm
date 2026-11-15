@@ -2,14 +2,17 @@ import { gcm } from '@noble/ciphers/aes.js';
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { hkdf } from '@noble/hashes/hkdf.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { keccak_256 } from '@noble/hashes/sha3.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 
 /**
  * Venice's end-to-end encryption, as its guide describes it: her messages are encrypted on
  * the phone to the key the attestation names as the model's enclave (TEE) key, and the answer
- * comes back encrypted to a key that only this call holds. That the key really is the
- * enclave's rests on Venice's word for now: Intel's signature on the quote and the key's
- * binding to it are not checked (providers.ts, `attest`).
+ * comes back encrypted to a key that only this call holds. That a real Intel TDX machine
+ * vouched for the model's key is checked on the phone: Intel's signature on the quote
+ * (tdxQuote.ts), and that the quote holds this key and this call's nonce (`quoteNamesKey`).
+ * Which software runs on that machine, and so who holds the key's secret, is not checked
+ * (providers.ts, `attest`).
  * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models
  *
  * - Key agreement: ECDH on secp256k1; the shared secret is the 32-byte x-coordinate.
@@ -132,7 +135,7 @@ const u16 = (bytes: Uint8Array, at: number) => bytes[at] | (bytes[at + 1] << 8);
 const u32 = (bytes: Uint8Array, at: number) => (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0;
 
 /** Where the TD report body starts in a quote, or null for a quote this check can't read. */
-function tdReportAt(bytes: Uint8Array): number | null {
+export function tdReportAt(bytes: Uint8Array): number | null {
   if (bytes.length < QUOTE_HEADER_BYTES + 6 || u32(bytes, 4) !== TDX_TEE_TYPE) return null;
   const version = u16(bytes, 0);
   if (version === 4) return bytes.length >= QUOTE_HEADER_BYTES + TD_REPORT_BYTES[2] ? QUOTE_HEADER_BYTES : null;
@@ -143,7 +146,8 @@ function tdReportAt(bytes: Uint8Array): number | null {
   return at;
 }
 
-function quoteBytes(quote: string): Uint8Array | null {
+/** The quote's bytes, from the text the attestation carries it in; null when it is neither hex nor base64, or far too long. */
+export function quoteBytes(quote: string): Uint8Array | null {
   if (quote.length > MAX_QUOTE_CHARS) return null;
   const value = quote.startsWith('0x') ? quote.slice(2) : quote;
   // The docs call it base64; hex is read too, since both have been seen.
@@ -168,4 +172,24 @@ export function quoteIsNotDebug(quote: unknown): boolean {
   if (!bytes) return false;
   const body = tdReportAt(bytes);
   return body !== null && (bytes[body + TD_ATTRIBUTES_IN_BODY] & 0x01) === 0;
+}
+
+/**
+ * Whether a quote's REPORTDATA names this model key and this call's nonce. Venice's
+ * attestation fills the 64 bytes as: the key's Ethereum address (20 bytes: the last 20 of
+ * Keccak-256 over the key's x and y), 12 unused bytes, then the 32-byte nonce, as it was
+ * sent or as its SHA-256. Venice's guide says only that the key "should be bound to the TDX
+ * REPORTDATA field"; the layout is the one two independent clients check
+ * (github.com/elkimek/venice-e2ee, github.com/jooray/venice-e2ee-proxy).
+ *
+ * This means something only for a quote whose signature passed (tdxQuote.ts): then a real
+ * Intel TDX machine put this key there, for this call. Which machine, running what, it does
+ * not say: the quote's measurements are not compared with anything. `modelKeyHex` is the key as `modelKeyFrom` gives it; `nonceHex` is 64 hex characters.
+ */
+export function quoteNamesKey(reportData: Uint8Array, modelKeyHex: string, nonceHex: string): boolean {
+  if (reportData.length !== 64 || modelKeyFrom(modelKeyHex) !== modelKeyHex || nonceHex.length !== ATTESTATION_NONCE_BYTES * 2 || !HEX.test(nonceHex)) return false;
+  const address = keccak_256(hexToBytes(modelKeyHex).subarray(1)).subarray(12);
+  const nonce = hexToBytes(nonceHex);
+  const inQuote = bytesToHex(reportData.subarray(32));
+  return bytesToHex(reportData.subarray(0, 20)) === bytesToHex(address) && (inQuote === bytesToHex(nonce) || inQuote === bytesToHex(sha256(nonce)));
 }
