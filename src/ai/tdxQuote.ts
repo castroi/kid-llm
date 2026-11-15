@@ -1,4 +1,3 @@
-import { p256 } from '@noble/curves/nist.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes } from '@noble/hashes/utils.js';
 import { tdReportAt } from './e2ee';
@@ -25,6 +24,11 @@ import { INTEL_SGX_ROOT_KEY } from './intelRoot';
  *
  * Layout: Intel TDX DCAP Quoting Library API, "Quote Format" (versions 4 and 5).
  * Certificates: RFC 5280, read only as far as these checks need.
+ *
+ * The four signatures are checked by the browser's own cryptography (WebCrypto), not by a
+ * JavaScript library: on an iPhone a P-256 check in JavaScript takes long enough to feel,
+ * and there are four for every message. Without WebCrypto the check fails, as any check
+ * that can't be made.
  */
 
 /** The outcome: REPORTDATA (64 bytes) of a quote that passed, or why it did not. */
@@ -153,7 +157,7 @@ function derTime(node: Der | undefined): number {
 interface Certificate {
   /** The signed part, byte for byte. */
   signed: Uint8Array;
-  /** The issuer's signature over it, in DER. */
+  /** The issuer's signature over it, in DER (see rawSignature). */
   signature: Uint8Array;
   issuer: Uint8Array;
   subject: Uint8Array;
@@ -225,18 +229,41 @@ function firstTwoCertificates(pem: Uint8Array): Certificate[] {
 }
 
 /**
- * ECDSA over P-256 with SHA-256. A signature or a key that can't be read counts as a wrong
- * one. Intel's signatures are not "low S", so that rule of the library's is switched off.
+ * A certificate's signature as the 64 bytes r || s that WebCrypto takes. In a certificate it
+ * is DER: SEQUENCE { INTEGER r, INTEGER s }, each with a zero byte in front when its first
+ * bit is set, and without its leading zero bytes otherwise.
  */
-function signedBy(key: Uint8Array, message: Uint8Array, signature: Uint8Array, format: 'compact' | 'der'): boolean {
+function rawSignature(der: Uint8Array): Uint8Array {
+  const outer = derList(der);
+  const numbers = outer.length === 1 && outer[0].tag === SEQUENCE ? derList(outer[0].content) : [];
+  if (numbers.length !== 2) refuse('a certificate signature that could not be read');
+  const raw = new Uint8Array(SIGNATURE_BYTES);
+  numbers.forEach((value, i) => {
+    let digits = value.content;
+    while (digits.length > 32 && digits[0] === 0) digits = digits.subarray(1);
+    if (value.tag !== INTEGER || digits.length === 0 || digits.length > 32) refuse('a certificate signature that could not be read');
+    raw.set(digits, (i + 1) * 32 - digits.length);
+  });
+  return raw;
+}
+
+/** SubjectPublicKeyInfo for a P-256 key, up to the key itself: the form every browser imports. */
+const P256_KEY_INFO = hexToBytes('3059301306072a8648ce3d020106082a8648ce3d030107034200');
+
+/**
+ * ECDSA over P-256 with SHA-256, by WebCrypto. `key` is 04 || x || y; `signature` is r || s.
+ * A signature or a key that can't be read counts as a wrong one.
+ */
+async function signedBy(key: Uint8Array, message: Uint8Array, signature: Uint8Array): Promise<boolean> {
   try {
-    return p256.verify(signature, message, key, { format, lowS: false });
+    const imported = await crypto.subtle.importKey('spki', new Uint8Array([...P256_KEY_INFO, ...key]), { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+    return await crypto.subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, imported, new Uint8Array(signature), new Uint8Array(message));
   } catch {
     return false;
   }
 }
 
-function checked(quote: Uint8Array, now: number): Uint8Array {
+async function checked(quote: Uint8Array, now: number): Promise<Uint8Array> {
   const body = tdReportAt(quote);
   if (body === null) refuse('not a TDX quote of a known version');
   const header = reader(quote.subarray(0, HEADER_BYTES));
@@ -260,16 +287,16 @@ function checked(quote: Uint8Array, now: number): Uint8Array {
   const [pck, issuer] = firstTwoCertificates(certification.take(certification.u32()));
 
   // 1. Intel's root signed the issuer, which may sign certificates and is in date.
-  if (!signedBy(hexToBytes(INTEL_SGX_ROOT_KEY), issuer.signed, issuer.signature, 'der')) refuse("the certificate chain does not lead to Intel's root");
+  if (!(await signedBy(hexToBytes(INTEL_SGX_ROOT_KEY), issuer.signed, rawSignature(issuer.signature)))) refuse("the certificate chain does not lead to Intel's root");
   if (!issuer.authority) refuse('a certificate that may not sign others was used to sign one');
   // 2. The issuer signed the PCK certificate, and it is one: Intel's root signs other things too.
-  if (!same(pck.issuer, issuer.subject) || !signedBy(issuer.key, pck.signed, pck.signature, 'der')) refuse('the PCK certificate was not signed by the certificate above it');
+  if (!same(pck.issuer, issuer.subject) || !(await signedBy(issuer.key, pck.signed, rawSignature(pck.signature)))) refuse('the PCK certificate was not signed by the certificate above it');
   if (!pck.processor || pck.authority) refuse('the first certificate is not a PCK certificate');
   for (const cert of [issuer, pck]) {
     if (!(now >= cert.notBefore && now <= cert.notAfter)) refuse('a certificate that is out of date');
   }
   // 3. The PCK key signed the QE report, and the report is Intel's quoting enclave, not in debug mode.
-  if (!signedBy(pck.key, qeReport, qeSignature, 'compact')) refuse('the quoting enclave report was not signed by the PCK key');
+  if (!(await signedBy(pck.key, qeReport, qeSignature))) refuse('the quoting enclave report was not signed by the PCK key');
   const flagsFit = QE_FLAGS.every((flag, i) => (qeReport[48 + i] & QE_FLAGS_MASK[i]) === flag);
   const noMiscSelect = qeReport.subarray(16, 20).every((byte) => byte === 0);
   const product = qeReport[256] | (qeReport[257] << 8);
@@ -278,7 +305,7 @@ function checked(quote: Uint8Array, now: number): Uint8Array {
   const named = sha256(new Uint8Array([...attestationKey, ...qeData]));
   if (!same(named, qeReport.subarray(320, 352))) refuse('the attestation key is not the one the quoting enclave reported');
   // 5. The attestation key signed the header and the TD report.
-  if (!signedBy(new Uint8Array([4, ...attestationKey]), quote.subarray(0, signedEnd), quoteSignature, 'compact')) refuse('the quote was not signed by its attestation key');
+  if (!(await signedBy(new Uint8Array([4, ...attestationKey]), quote.subarray(0, signedEnd), quoteSignature))) refuse('the quote was not signed by its attestation key');
 
   return quote.slice(body + REPORT_DATA_IN_BODY, body + REPORT_DATA_IN_BODY + REPORT_DATA_BYTES);
 }
@@ -288,9 +315,9 @@ function checked(quote: Uint8Array, now: number): Uint8Array {
  * Date.now() gives). Returns the quote's REPORTDATA, which only then means anything.
  * Anything that can't be read fails: a check that can't be made counts as failed.
  */
-export function checkQuote(quote: Uint8Array, now: number): QuoteCheck {
+export async function checkQuote(quote: Uint8Array, now: number): Promise<QuoteCheck> {
   try {
-    return { ok: true, reportData: checked(quote, now) };
+    return { ok: true, reportData: await checked(quote, now) };
   } catch (err) {
     return { ok: false, why: err instanceof Refused ? err.message : 'the quote could not be read' };
   }

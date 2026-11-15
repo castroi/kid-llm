@@ -357,7 +357,7 @@ async function attest(model: string, apiKey: string, signal: AbortSignal, fetchF
   const key = modelKeyFrom(given);
   if (!key || typeof given !== 'string') throw new AiError('not-verified', 'no usable model key in the attestation');
   // The phone's clock decides whether Intel's certificates are in date.
-  const signed = checkQuote(quote, Date.now());
+  const signed = await checkQuote(quote, Date.now());
   if (!signed.ok) throw new AiError('not-verified', `TDX quote: ${signed.why}`);
   if (!quoteNamesKey(signed.reportData, key, nonce)) throw new AiError('not-verified', 'the TDX quote does not hold this model key and this nonce');
   // The header carries the key as the attestation gave it, as in the docs' example; it is hex, so it is safe in a header.

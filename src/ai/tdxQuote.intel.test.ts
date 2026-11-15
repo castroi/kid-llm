@@ -12,12 +12,12 @@ import { checkQuote } from './tdxQuote';
 // No stand-in here: Intel's real root key, and quotes that real Intel hardware signed.
 
 describe("Intel's root key", () => {
-  it('is a point on P-256, written as 04 || x || y', () => {
+  it('is a point on P-256, written as 04 || x || y', async () => {
     expect(INTEL_SGX_ROOT_KEY).toMatch(/^04[0-9a-f]{128}$/);
     expect(() => p256.Point.fromBytes(hexToBytes(INTEL_SGX_ROOT_KEY)).assertValidity()).not.toThrow();
   });
 
-  it('is the key of the "Intel SGX Root CA" certificate that real quotes carry', () => {
+  it('is the key of the "Intel SGX Root CA" certificate that real quotes carry', async () => {
     // The last certificate in a real quote's chain is Intel's root, signed by itself. Its
     // SubjectPublicKeyInfo is a fixed prefix and then the key; SHA-256 of the whole certificate
     // is the fingerprint Intel's root is known by.
@@ -36,14 +36,14 @@ describe('quotes signed by real Intel hardware', () => {
     ['version 5', INTEL_QUOTE_V5, INTEL_QUOTE_V5_REPORT_DATA],
   ];
 
-  it.each(real)('%s passes, and gives its REPORTDATA', (_name: string, hex: string, reportData: string) => {
-    const result = checkQuote(hexToBytes(hex), NOW);
+  it.each(real)('%s passes, and gives its REPORTDATA', async (_name: string, hex: string, reportData: string) => {
+    const result = await checkQuote(hexToBytes(hex), NOW);
     expect(result.ok).toBe(true);
     expect(result.ok && bytesToHex(result.reportData)).toBe(reportData);
     expect(quoteIsNotDebug(hex)).toBe(true);
   });
 
-  it.each(real)('%s is refused with one bit changed in any signed part', (_name: string, hex: string) => {
+  it.each(real)('%s is refused with one bit changed in any signed part', async (_name: string, hex: string) => {
     const quote = hexToBytes(hex);
     const body = quote[0] === 5 ? 54 : 48;
     const signatureData = body + (quote[0] === 5 ? 648 : 584) + 4;
@@ -62,11 +62,11 @@ describe('quotes signed by real Intel hardware', () => {
     for (const at of places) {
       const changed = quote.slice();
       changed[at] ^= 0x01;
-      expect(checkQuote(changed, NOW).ok).toBe(false);
+      expect((await checkQuote(changed, NOW)).ok).toBe(false);
     }
   });
 
-  it.each(real)('%s is refused with one letter changed in either certificate', (_name: string, hex: string) => {
+  it.each(real)('%s is refused with one letter changed in either certificate', async (_name: string, hex: string) => {
     const quote = hexToBytes(hex);
     const text = new TextDecoder('latin1').decode(quote);
     const starts = [...text.matchAll(/-----BEGIN CERTIFICATE-----\n/g)].map((match) => (match.index ?? 0) + match[0].length);
@@ -75,21 +75,21 @@ describe('quotes signed by real Intel hardware', () => {
         const changed = quote.slice();
         // Another base64 letter: the certificate's bytes change, its length does not.
         changed[start + offset] = changed[start + offset] === 0x41 ? 0x42 : 0x41;
-        expect(checkQuote(changed, NOW).ok).toBe(false);
+        expect((await checkQuote(changed, NOW)).ok).toBe(false);
       }
     }
   });
 
-  it('is refused before its certificates are valid and after they run out', () => {
-    expect(checkQuote(hexToBytes(INTEL_QUOTE_V4), Date.UTC(2025, 0, 1))).toEqual({ ok: false, why: 'a certificate that is out of date' });
-    expect(checkQuote(hexToBytes(INTEL_QUOTE_V4), Date.UTC(2032, 2, 1))).toEqual({ ok: false, why: 'a certificate that is out of date' });
+  it('is refused before its certificates are valid and after they run out', async () => {
+    expect(await checkQuote(hexToBytes(INTEL_QUOTE_V4), Date.UTC(2025, 0, 1))).toEqual({ ok: false, why: 'a certificate that is out of date' });
+    expect(await checkQuote(hexToBytes(INTEL_QUOTE_V4), Date.UTC(2032, 2, 1))).toEqual({ ok: false, why: 'a certificate that is out of date' });
     // The certificate above it runs out in 2033.
-    expect(checkQuote(hexToBytes(INTEL_QUOTE_V5), Date.UTC(2033, 5, 1))).toEqual({ ok: false, why: 'a certificate that is out of date' });
+    expect(await checkQuote(hexToBytes(INTEL_QUOTE_V5), Date.UTC(2033, 5, 1))).toEqual({ ok: false, why: 'a certificate that is out of date' });
   });
 });
 
 describe('a quote that anyone could make', () => {
-  it("is refused: a complete, well-signed chain that starts at somebody else's root", () => {
-    expect(checkQuote(signedQuote(), NOW)).toEqual({ ok: false, why: "the certificate chain does not lead to Intel's root" });
+  it("is refused: a complete, well-signed chain that starts at somebody else's root", async () => {
+    expect(await checkQuote(signedQuote(), NOW)).toEqual({ ok: false, why: "the certificate chain does not lead to Intel's root" });
   });
 });

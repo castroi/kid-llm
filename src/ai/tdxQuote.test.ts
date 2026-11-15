@@ -19,50 +19,55 @@ function renamed(block: string): string {
 }
 
 /** Why a quote was refused; fails the test if it passed. */
-function refusal(options: QuoteOptions, now = NOW): string {
-  const result = checkQuote(signedQuote(options), now);
+async function refusal(options: QuoteOptions, now = NOW): Promise<string> {
+  const result = await checkQuote(signedQuote(options), now);
   expect(result.ok).toBe(false);
   return result.ok ? '' : result.why;
 }
 
 describe('a TDX quote whose signatures lead to the root', () => {
-  it('passes, and gives the REPORTDATA the enclave chose', () => {
+  it('passes, and gives the REPORTDATA the enclave chose', async () => {
     const reportData = Uint8Array.from({ length: 64 }, (_, i) => i);
-    const result = checkQuote(signedQuote({ reportData }), NOW);
+    const result = await checkQuote(signedQuote({ reportData }), NOW);
     expect(result).toEqual({ ok: true, reportData });
   });
 
-  it('passes as a version 5 quote, with a TD report 1.0 or 1.5', () => {
+  it('passes as a version 5 quote, with a TD report 1.0 or 1.5', async () => {
     for (const bodyType of [2, 3] as const) {
       const reportData = new Uint8Array(64).fill(bodyType);
-      expect(checkQuote(signedQuote({ version: 5, bodyType, reportData }), NOW)).toEqual({ ok: true, reportData });
+      expect(await checkQuote(signedQuote({ version: 5, bodyType, reportData }), NOW)).toEqual({ ok: true, reportData });
     }
   });
 
-  it('passes with bytes after the signature data, as real quotes have', () => {
-    expect(checkQuote(signedQuote({ padding: 70 }), NOW).ok).toBe(true);
+  it('passes with bytes after the signature data, as real quotes have', async () => {
+    expect((await checkQuote(signedQuote({ padding: 70 }), NOW)).ok).toBe(true);
   });
 
-  it('reads certificate dates in both forms, and holds them to the day', () => {
+  it('reads certificate dates in both forms, and holds them to the day', async () => {
     for (const generalizedTime of [false, true]) {
       const options: QuoteOptions = { issuer: { generalizedTime }, pck: { generalizedTime } };
-      expect(checkQuote(signedQuote(options), VALID_FROM).ok).toBe(true);
-      expect(checkQuote(signedQuote(options), VALID_TO).ok).toBe(true);
-      expect(refusal(options, VALID_FROM - 1000)).toBe('a certificate that is out of date');
-      expect(refusal(options, VALID_TO + 1000)).toBe('a certificate that is out of date');
+      expect((await checkQuote(signedQuote(options), VALID_FROM)).ok).toBe(true);
+      expect((await checkQuote(signedQuote(options), VALID_TO)).ok).toBe(true);
+      expect(await refusal(options, VALID_FROM - 1000)).toBe('a certificate that is out of date');
+      expect(await refusal(options, VALID_TO + 1000)).toBe('a certificate that is out of date');
     }
   });
 
-  it('reads a two-digit year of 50 and up as 19xx', () => {
+  it('reads a two-digit year of 50 and up as 19xx', async () => {
     // Valid 1999 to 2035: fine now. Valid 2025 to "49" means 2049, to "50" would mean 1950.
-    expect(checkQuote(signedQuote({ issuer: { notBefore: Date.UTC(1999, 0, 1) } }), NOW).ok).toBe(true);
-    expect(checkQuote(signedQuote({ issuer: { notAfter: Date.UTC(2049, 11, 31) } }), NOW).ok).toBe(true);
-    expect(refusal({ issuer: { notAfter: Date.UTC(2050, 0, 1) } })).toBe('a certificate that is out of date');
+    expect((await checkQuote(signedQuote({ issuer: { notBefore: Date.UTC(1999, 0, 1) } }), NOW)).ok).toBe(true);
+    expect((await checkQuote(signedQuote({ issuer: { notAfter: Date.UTC(2049, 11, 31) } }), NOW)).ok).toBe(true);
+    expect(await refusal({ issuer: { notAfter: Date.UTC(2050, 0, 1) } })).toBe('a certificate that is out of date');
   });
 
-  it('does not read the root certificate the quote carries: only the key the app holds counts', () => {
-    expect(checkQuote(signedQuote({ chain: ([pck, issuer]) => [pck, issuer] }), NOW).ok).toBe(true);
-    expect(checkQuote(signedQuote({ chain: ([pck, issuer]) => [pck, issuer, '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n'] }), NOW).ok).toBe(true);
+  it('reads a certificate signature whose numbers are shorter than usual', async () => {
+    expect((await checkQuote(signedQuote({ issuer: { shortR: true } }), NOW)).ok).toBe(true);
+    expect((await checkQuote(signedQuote({ pck: { shortR: true } }), NOW)).ok).toBe(true);
+  });
+
+  it('does not read the root certificate the quote carries: only the key the app holds counts', async () => {
+    expect((await checkQuote(signedQuote({ chain: ([pck, issuer]) => [pck, issuer] }), NOW)).ok).toBe(true);
+    expect((await checkQuote(signedQuote({ chain: ([pck, issuer]) => [pck, issuer, '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n'] }), NOW)).ok).toBe(true);
   });
 });
 
@@ -105,41 +110,41 @@ describe('a quote that Intel did not sign is refused', () => {
     ['a certificate whose date is another kind of value', { pck: { signedPart: (fields) => fields.map((field, i) => (i === 4 ? der(0x30, der(0x0c, [0x41]), der(0x0c, [0x41])) : field)) } }, 'a certificate date that could not be read'],
     ['a certificate with no dates', { pck: { signedPart: (fields) => fields.map((field, i) => (i === 4 ? der(0x30) : field)) } }, 'a certificate date that could not be read'],
   ];
-  it.each(cases)('%s', (_name: string, options: QuoteOptions, why: string) => {
-    expect(refusal(options)).toBe(why);
+  it.each(cases)('%s', async (_name: string, options: QuoteOptions, why: string) => {
+    expect(await refusal(options)).toBe(why);
   });
 
-  it('a PCK certificate signed by the root itself, with the root not above it in the chain', () => {
+  it('a PCK certificate signed by the root itself, with the root not above it in the chain', async () => {
     // The second certificate must be signed by the root AND be the signer of the first.
     const stray = pem(certificate({ subject: 'Stray CA', issuer: 'Test Root CA', secret: STRANGER_SECRET, signer: STRANGER_SECRET, authority: true }));
-    expect(refusal({ chain: ([pck, , root]) => [pck, stray, root] })).toBe("the certificate chain does not lead to Intel's root");
+    expect(await refusal({ chain: ([pck, , root]) => [pck, stray, root] })).toBe("the certificate chain does not lead to Intel's root");
   });
 
-  it('a self-made chain that only names Intel', () => {
+  it('a self-made chain that only names Intel', async () => {
     // A forger's own root, issuer and PCK certificate with the right names: the names prove nothing.
-    expect(refusal({ rootSecret: STRANGER_SECRET, issuer: { subject: 'Intel SGX PCK Platform CA', issuer: 'Intel SGX Root CA' }, pck: { issuer: 'Intel SGX PCK Platform CA' } })).toBe("the certificate chain does not lead to Intel's root");
+    expect(await refusal({ rootSecret: STRANGER_SECRET, issuer: { subject: 'Intel SGX PCK Platform CA', issuer: 'Intel SGX Root CA' }, pck: { issuer: 'Intel SGX PCK Platform CA' } })).toBe("the certificate chain does not lead to Intel's root");
   });
 });
 
 describe('a quote that can not be read is refused', () => {
-  it('cut short anywhere', () => {
+  it('cut short anywhere', async () => {
     const quote = signedQuote();
-    for (let length = 0; length < quote.length; length += 23) expect(checkQuote(quote.slice(0, length), NOW).ok).toBe(false);
-    expect(checkQuote(quote.slice(0, quote.length - 1), NOW).ok).toBe(false);
-    expect(checkQuote(quote.slice(0, 700), NOW)).toEqual({ ok: false, why: 'the quote is cut short' });
+    for (let length = 0; length < quote.length; length += 23) expect((await checkQuote(quote.slice(0, length), NOW)).ok).toBe(false);
+    expect((await checkQuote(quote.slice(0, quote.length - 1), NOW)).ok).toBe(false);
+    expect(await checkQuote(quote.slice(0, 700), NOW)).toEqual({ ok: false, why: 'the quote is cut short' });
   });
 
-  it('of another kind or version', () => {
+  it('of another kind or version', async () => {
     const sgx = signedQuote();
     sgx[4] = 0x00;
-    expect(checkQuote(sgx, NOW)).toEqual({ ok: false, why: 'not a TDX quote of a known version' });
+    expect(await checkQuote(sgx, NOW)).toEqual({ ok: false, why: 'not a TDX quote of a known version' });
     const v3 = signedQuote();
     v3[0] = 3;
-    expect(checkQuote(v3, NOW)).toEqual({ ok: false, why: 'not a TDX quote of a known version' });
-    expect(checkQuote(new Uint8Array(0), NOW).ok).toBe(false);
+    expect(await checkQuote(v3, NOW)).toEqual({ ok: false, why: 'not a TDX quote of a known version' });
+    expect((await checkQuote(new Uint8Array(0), NOW)).ok).toBe(false);
   });
 
-  it('with certificates that are not certificates', () => {
+  it('with certificates that are not certificates', async () => {
     const block = (bytes: number[]) => pem(Uint8Array.from(bytes));
     const unreadable = 'a certificate that could not be read';
     const broken: [number[], string][] = [
@@ -155,27 +160,60 @@ describe('a quote that can not be read is refused', () => {
       [[0x30, 0x00, 0x30, 0x00], unreadable], // two values where one belongs
     ];
     for (const [bytes, why] of broken) {
-      expect(refusal({ chain: ([, issuer, root]) => [block(bytes), issuer, root] })).toBe(why);
+      expect(await refusal({ chain: ([, issuer, root]) => [block(bytes), issuer, root] })).toBe(why);
     }
     // Base64 that is not base64 can't be decoded at all.
-    expect(refusal({ chain: ([, issuer, root]) => ['-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----\n', issuer, root] })).toBe('the quote could not be read');
+    expect(await refusal({ chain: ([, issuer, root]) => ['-----BEGIN CERTIFICATE-----\nA\n-----END CERTIFICATE-----\n', issuer, root] })).toBe('the quote could not be read');
   });
 
-  it('with a signature or a key that is not one', () => {
+  it('with a certificate signature that is not two numbers', async () => {
+    const int = (...bytes: number[]) => der(0x02, bytes);
+    const full = new Array<number>(32).fill(0x11);
+    const notSignatures = [
+      der(0x30, int(...full)), // one number
+      der(0x30, int(...full), int(...full), int(...full)), // three
+      der(0x30, int(1, ...full), int(...full)), // r of 33 bytes that is not a leading zero
+      der(0x30, int(), int(...full)), // an empty r
+      der(0x30, der(0x04, full), int(...full)), // r is not a number
+      der(0x04, full), // not a sequence
+      Uint8Array.from([0x30, 0x10, 0x02]), // cut short
+    ];
+    for (const signature of notSignatures) {
+      expect(await refusal({ issuer: { signature } })).toMatch(/^a certificate( signature)? that could not be read$/);
+      expect(await refusal({ pck: { signature } })).toMatch(/^a certificate( signature)? that could not be read$/);
+    }
+    // Two numbers of the right size that are nobody's signature.
+    expect(await refusal({ issuer: { signature: der(0x30, int(...full), int(...full)) } })).toBe("the certificate chain does not lead to Intel's root");
+    // Zero, and numbers past the curve's order.
+    expect(await refusal({ issuer: { signature: der(0x30, int(0), int(0)) } })).toBe("the certificate chain does not lead to Intel's root");
+    expect(await refusal({ issuer: { signature: der(0x30, int(0, ...new Array<number>(32).fill(0xff)), int(0, ...new Array<number>(32).fill(0xff))) } })).toBe("the certificate chain does not lead to Intel's root");
+  });
+
+  it('with a key that is not a point on the curve, even when everything above it vouches for it', async () => {
+    // (1, 1) is not on P-256. The browser refuses to take such a key at all; that must count as a wrong signature.
+    const offCurve = new Uint8Array(64);
+    offCurve[31] = 1;
+    offCurve[63] = 1;
+    expect(await refusal({ attestationKey: offCurve })).toBe('the quote was not signed by its attestation key');
+    expect(await refusal({ pck: { publicKey: Uint8Array.from([4, ...offCurve]) } })).toBe('the quoting enclave report was not signed by the PCK key');
+    expect(await refusal({ issuer: { publicKey: Uint8Array.from([4, ...offCurve]) } })).toBe('the PCK certificate was not signed by the certificate above it');
+  });
+
+  it('with a signature or a key that is not one', async () => {
     // An attestation key that is not a point on the curve, named correctly by the QE report.
     const quote = signedQuote();
     const keyAt = 48 + 584 + 4 + 64;
     quote.fill(0xff, keyAt, keyAt + 64);
-    expect(checkQuote(quote, NOW).ok).toBe(false);
+    expect((await checkQuote(quote, NOW)).ok).toBe(false);
     // A certificate signature that is not DER.
-    expect(refusal({ chain: ([pck, issuer, root]) => [pck, issuer, root].map((cert, i) => (i === 0 ? pem(certificate({ subject: 'x', issuer: 'Test PCK Platform CA', secret: STRANGER_SECRET, signer: STRANGER_SECRET }).slice(0, -3)) : cert)) })).toBe('a certificate that could not be read');
+    expect(await refusal({ chain: ([pck, issuer, root]) => [pck, issuer, root].map((cert, i) => (i === 0 ? pem(certificate({ subject: 'x', issuer: 'Test PCK Platform CA', secret: STRANGER_SECRET, signer: STRANGER_SECRET }).slice(0, -3)) : cert)) })).toBe('a certificate that could not be read');
   });
 });
 
 describe('what the check reads', () => {
-  it('REPORTDATA comes from the signed bytes, as a copy', () => {
+  it('REPORTDATA comes from the signed bytes, as a copy', async () => {
     const quote = signedQuote({ reportData: new Uint8Array(64).fill(1) });
-    const result = checkQuote(quote, NOW);
+    const result = await checkQuote(quote, NOW);
     expect(result.ok).toBe(true);
     quote.fill(0);
     expect(result.ok && bytesToHex(result.reportData)).toBe('01'.repeat(64));

@@ -81,6 +81,15 @@ export interface CertOptions {
   v1?: boolean;
   /** Changes the signed part before it is signed. */
   signedPart?: (fields: Uint8Array[]) => Uint8Array[];
+  /** Puts these 65 bytes where the certificate's own public key belongs. */
+  publicKey?: Uint8Array;
+  /** Puts something else where the signature (DER: SEQUENCE { INTEGER r, INTEGER s }) belongs. */
+  signature?: Uint8Array;
+  /**
+   * Picks a serial number for which the signature's r is shorter than 32 bytes (one in 256
+   * is), so its DER form has fewer bytes than usual.
+   */
+  shortR?: boolean;
 }
 
 /** An X.509 certificate in DER, signed with ECDSA P-256 and SHA-256. */
@@ -95,20 +104,24 @@ export function certificate(options: CertOptions): Uint8Array {
     ...(options.sgxExtension ? [sequence(oid('2a864886f84d010d01'), der(0x04, sequence()))] : []),
     ...(authority === 'none' ? [] : [sequence(oid('551d13'), der(0x01, [0xff]), der(0x04, sequence(...(authority === true ? [der(0x01, [0xff])] : authority === 'written false' ? [der(0x01, [0x00])] : []))))]),
   ];
-  let fields: Uint8Array[] = [
+  const fieldsFor = (serial: number): Uint8Array[] => [
     ...(options.v1 ? [] : [der(0xa0, der(0x02, [2]))]),
-    der(0x02, [0x01, 0x23]),
+    der(0x02, [0x01, (serial >> 8) & 0xff, serial & 0xff]),
     algorithm,
     name(options.issuer),
     sequence(time(options.notBefore ?? VALID_FROM, generalized), time(options.notAfter ?? VALID_TO, generalized)),
     name(options.subject),
-    sequence(options.keyAlgorithm ?? KEY_ON_P256, der(0x03, [0], publicOf(options.secret))),
+    sequence(options.keyAlgorithm ?? KEY_ON_P256, der(0x03, [0], options.publicKey ?? publicOf(options.secret))),
     ...(options.v1 ? [] : [der(0xa3, sequence(...extensions))]),
   ];
-  if (options.signedPart) fields = options.signedPart(fields);
-  const signed = sequence(...fields);
-  const signature = p256.sign(signed, options.signer, { format: 'der', lowS: false });
-  return sequence(signed, algorithm, der(0x03, [0], signature));
+  for (let serial = 0x2300; ; serial++) {
+    const fields = fieldsFor(serial);
+    const signed = sequence(...(options.signedPart ? options.signedPart(fields) : fields));
+    const signature = p256.sign(signed, options.signer, { format: 'der', lowS: false });
+    // DER: 30 len 02 <length of r> …
+    if (options.shortR && signature[3] >= 32) continue;
+    return sequence(signed, algorithm, der(0x03, [0], options.signature ?? signature));
+  }
 }
 
 /** A certificate as PEM text: base64 in lines of 64, between the BEGIN and END lines. */
@@ -144,6 +157,8 @@ export interface QuoteOptions {
   qeMiscSelect?: number;
   /** What the QE report says it vouches for, instead of SHA-256(attestation key || QE data). */
   qeReportData?: Uint8Array;
+  /** Puts these 64 bytes where the attestation key (x || y) belongs; the QE report then vouches for them. */
+  attestationKey?: Uint8Array;
   /** Who signs the header and the TD report (the attestation key, unless a test says otherwise). */
   quoteSigner?: Uint8Array;
   outerType?: number;
@@ -183,7 +198,7 @@ export function signedQuote(options: QuoteOptions = {}): Uint8Array {
   // Real quotes end the chain with a zero byte.
   const chain = concat([ascii((options.chain ? options.chain(blocks) : blocks).join('')), [0]]);
 
-  const attestationKey = publicOf(ATTESTATION_SECRET).slice(1);
+  const attestationKey = options.attestationKey ?? publicOf(ATTESTATION_SECRET).slice(1);
   const qeData = new Uint8Array(32).fill(0x07);
   const qeReport = new Uint8Array(384);
   qeReport.set(u32(options.qeMiscSelect ?? 0), 16);
