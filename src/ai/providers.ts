@@ -1,9 +1,10 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
-import { attestationNonce, decryptPiece, encryptFor, looksEncrypted, modelKeyFrom, newClientKeys, quoteIsNotDebug, wipe } from './e2ee';
+import { attestationNonce, decryptPiece, encryptFor, looksEncrypted, modelKeyFrom, newClientKeys, quoteBytes, quoteIsNotDebug, quoteNamesKey, wipe } from './e2ee';
 import { dataUrl, SENT_FILE_NAMES, type ChatFile } from './files';
 import { sanitizeModels, type ModelInfo, type ModelKind } from './models';
 import { sanitizeSources, type Source } from './sources';
 import { LineTooLongError, sseData } from './sse';
+import { checkQuote } from './tdxQuote';
 
 /**
  * One adapter per provider: how to ask for a chat answer and how to check a key.
@@ -313,10 +314,14 @@ export const MAX_ATTESTATION_BODY_CHARS = 1024 * 1024;
  * Asks Venice for the enclave's attestation for `model`, with a fresh 32-byte nonce, and
  * makes the checks the docs list: Venice's own verification passed, the nonce came back,
  * it is the model asked for, the TDX quote is not in debug mode, and the model's key is a
- * valid point. Anything missing or unreadable fails: then nothing of hers is sent.
- * What this does NOT prove: all of it is Venice's own answer. Intel's signature on the quote
- * (DCAP) and the key's binding to the quote (REPORTDATA) are not checked, so a provider that
- * lied could hand over a key of its own. Returns the model's key, checked and as given.
+ * valid point. Then two checks that don't rest on Venice's word: Intel hardware signed the
+ * quote (tdxQuote.ts), and the quote itself holds this model key and this call's nonce
+ * (e2ee.ts, `quoteNamesKey`). So a key the provider made up, or an old quote, fails.
+ * Anything missing or unreadable fails: then nothing of hers is sent.
+ * What this does NOT prove: which software runs in the enclave (the quote's measurements
+ * are not compared with anything), that the processor's firmware is up to date or its
+ * certificate not revoked, and the NVIDIA GPU evidence. A provider that runs other software
+ * on a real Intel TDX machine passes. Returns the model's key, checked and as given.
  * Docs: https://docs.venice.ai/guides/features/tee-e2ee-models#step-3-fetch-and-verify-tee-attestation
  */
 async function attest(model: string, apiKey: string, signal: AbortSignal, fetchFn: FetchLike): Promise<{ key: string; asGiven: string }> {
@@ -344,10 +349,15 @@ async function attest(model: string, apiKey: string, signal: AbortSignal, fetchF
   if (typeof report.nonce !== 'string' || report.nonce.toLowerCase() !== nonce) throw new AiError('not-verified', 'attestation nonce mismatch');
   // In any letter case: a name typed by hand may differ from the provider's in case only.
   if (typeof report.model !== 'string' || report.model.toLowerCase() !== model.toLowerCase()) throw new AiError('not-verified', 'attestation is for another model');
-  if (!quoteIsNotDebug(report.intel_quote)) throw new AiError('not-verified', 'enclave in debug mode, or no readable TDX quote');
+  const quote = typeof report.intel_quote === 'string' ? quoteBytes(report.intel_quote) : null;
+  if (!quote || !quoteIsNotDebug(report.intel_quote)) throw new AiError('not-verified', 'enclave in debug mode, or no readable TDX quote');
   const given = report.signing_key ?? report.signing_public_key;
   const key = modelKeyFrom(given);
   if (!key || typeof given !== 'string') throw new AiError('not-verified', 'no usable model key in the attestation');
+  // The phone's clock decides whether Intel's certificates are in date.
+  const signed = checkQuote(quote, Date.now());
+  if (!signed.ok) throw new AiError('not-verified', `TDX quote: ${signed.why}`);
+  if (!quoteNamesKey(signed.reportData, key, nonce)) throw new AiError('not-verified', 'the TDX quote does not hold this model key and this nonce');
   // The header carries the key as the attestation gave it, as in the docs' example; it is hex, so it is safe in a header.
   return { key, asGiven: given };
 }

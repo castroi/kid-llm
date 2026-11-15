@@ -705,11 +705,13 @@ describe('the model picker', () => {
     await openWithList();
     const note = screen.getByText(/E2EE: בשיחה ובחשבון ההודעות מוצפנות באייפון/);
     expect(note).toHaveTextContent('אם הבדיקה נכשלת דבר לא נשלח');
-    // It doesn't claim more than the check proves: the key is the one Venice reports, and neither
-    // Intel's signature nor the key's binding to the enclave is checked yet.
-    expect(note).toHaveTextContent('למפתח ש-Venice מדווחת שהוא של הסביבה המוגנת של המודל');
-    expect(note).toHaveTextContent('וגם לא שהמפתח באמת שייך לסביבה המוגנת');
-    expect(note).toHaveTextContent('ההגנה תלויה בכך ש-Venice מדווחת אמת');
+    // What the app checks itself: Intel hardware signed the attestation, and the key is in it.
+    expect(note).toHaveTextContent('שחומרה של Intel חתמה עליו, ושהמפתח שאליו מצפינים רשום בתוכו');
+    // It doesn't claim more than the check proves: which software runs in the enclave, and
+    // whether the hardware is up to date, are not checked, so it still rests on Venice.
+    expect(note).toHaveTextContent('האפליקציה עוד לא בודקת איזו תוכנה רצה בסביבה המוגנת, וגם לא שהחומרה מעודכנת');
+    expect(note).toHaveTextContent('ההגנה עדיין תלויה בכך ש-Venice מריצה שם את התוכנה הנכונה');
+    expect(note).not.toHaveTextContent('Venice מדווחת אמת');
     expect(note).not.toHaveTextContent('רק הסביבה המוגנת של המודל יכולה לפתוח');
     expect(note).not.toHaveTextContent('Venice מעבירה רק טקסט מוצפן');
     expect(note).toHaveTextContent('התשובות הקודמות בשיחה נשלחות שוב כמו שהן, לא מוצפנות');

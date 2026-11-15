@@ -1,11 +1,16 @@
 // @vitest-environment node
 import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { base64, enclaveDecrypt, enclaveEncrypt, fakeQuote } from '../test/enclave';
+import { reportDataFor, signedQuote, STRANGER_SECRET } from '../test/quote';
 import { AI_PROVIDERS } from './catalog';
 import { ADAPTERS, AiError, encryptedRequestProblem, MAX_ATTESTATION_BODY_CHARS, type FetchLike } from './providers';
 import { sendChat, type ChatRequest } from './send';
+
+// Intel's root is replaced by a test root for this file, so the fake enclave's quotes can be
+// signed "by Intel". The real root is tested with real quotes in tdxQuote.intel.test.ts.
+vi.mock('./intelRoot', async () => ({ INTEL_SGX_ROOT_KEY: (await import('../test/quote')).TEST_ROOT_KEY }));
 
 const KEY = 'sk-test-secret';
 const MODEL = 'private-model-1';
@@ -59,7 +64,8 @@ function fakeVenice(options: VeniceOptions = {}) {
         nonce,
         model: new URL(url).searchParams.get('model'),
         tee_provider: 'test',
-        intel_quote: base64(fakeQuote()),
+        // Signed down from the root, and holding this enclave's key and this call's nonce.
+        intel_quote: base64(signedQuote({ reportData: reportDataFor(enclavePublic, nonce) })),
         signing_key: enclavePublic,
         signing_address: '0x0000000000000000000000000000000000000000',
       };
@@ -117,6 +123,9 @@ async function failureOf(promise: Promise<unknown>): Promise<AiError> {
   expect(err).toBeInstanceOf(AiError);
   return err as AiError;
 }
+
+/** A key the provider holds itself: what it would hand over to read her messages. */
+const PROVIDER_PUBLIC = bytesToHex(secp256k1.getPublicKey(secp256k1.utils.randomSecretKey(), false));
 
 const TEE_HEADERS = ['X-Venice-TEE-Client-Pub-Key', 'X-Venice-TEE-Model-Pub-Key', 'X-Venice-TEE-Signing-Algo'];
 
@@ -190,6 +199,14 @@ describe('a model the list tags E2EE', () => {
     expect(enclaveDecrypt(venice.enclave, chat.body!.messages[1].content as string)).toBe('כמה זה 3+5?');
   });
 
+  it('accepts a quote that holds the nonce as its SHA-256, and one in hex', async () => {
+    for (const hashed of [true, false]) {
+      const venice = fakeVenice({ attestation: (good, nonce) => ({ ...good, intel_quote: bytesToHex(signedQuote({ reportData: reportDataFor(good.signing_key as string, nonce, hashed) })) }) });
+      await sendChat(request(venice.fetch));
+      expect(venice.chatCalls()).toHaveLength(1);
+    }
+  });
+
   it('accepts the attestation for the same model named in another letter case', async () => {
     const venice = fakeVenice({ attestation: (good) => ({ ...good, model: MODEL }) });
     await sendChat(request(venice.fetch, { model: MODEL.toUpperCase() }));
@@ -206,6 +223,14 @@ describe('an attestation that does not pass sends nothing of hers', () => {
     ['it is for another model', (good) => ({ ...good, model: 'other-model' })],
     ['the enclave is in debug mode', (good) => ({ ...good, intel_quote: base64(fakeQuote({ debug: true })) })],
     ['no TDX quote to check', (good) => without(good, 'intel_quote')],
+    ['a quote with no signatures at all', (good) => ({ ...good, intel_quote: base64(fakeQuote()) })],
+    ['a signed quote of a debug enclave', (good, nonce) => ({ ...good, intel_quote: base64(signedQuote({ debug: true, reportData: reportDataFor(good.signing_key as string, nonce) })) })],
+    ["a quote signed down from a root that is not Intel's", (good, nonce) => ({ ...good, intel_quote: base64(signedQuote({ rootSecret: STRANGER_SECRET, reportData: reportDataFor(good.signing_key as string, nonce) })) })],
+    ['a quote changed after it was signed', (good, nonce) => ({ ...good, intel_quote: base64(signedQuote({ reportData: reportDataFor(good.signing_key as string, nonce), afterSigning: (signed) => (signed[48 + 136] ^= 1) })) })],
+    ["the provider's own key in place of the enclave's, with the enclave's real quote", (good) => ({ ...good, signing_key: PROVIDER_PUBLIC })],
+    ["the provider's own key under the key's other name", (good) => ({ ...without(good, 'signing_key'), signing_public_key: PROVIDER_PUBLIC })],
+    ['a real quote made for an earlier call', (good) => ({ ...good, intel_quote: base64(signedQuote({ reportData: reportDataFor(good.signing_key as string, 'cd'.repeat(32)) })) })],
+    ['a real quote that holds no key', (good) => ({ ...good, intel_quote: base64(signedQuote()) })],
     ['no model key', (good) => without(good, 'signing_key')],
     ['a model key that is not a point on the curve', (good) => ({ ...good, signing_key: `04${'1'.repeat(128)}` })],
     ['not an object', () => [1, 2]],
@@ -215,6 +240,13 @@ describe('an attestation that does not pass sends nothing of hers', () => {
     const err = await failureOf(sendChat(request(venice.fetch)));
     expect(err.reason).toBe('not-verified');
     expect(venice.chatCalls()).toHaveLength(0);
+  });
+
+  it('says why, for the parent area: a key that is not in the quote, and a quote Intel did not sign', async () => {
+    const swapped = fakeVenice({ attestation: (good) => ({ ...good, signing_key: PROVIDER_PUBLIC }) });
+    expect((await failureOf(sendChat(request(swapped.fetch)))).detail).toBe('the TDX quote does not hold this model key and this nonce');
+    const forged = fakeVenice({ attestation: (good, nonce) => ({ ...good, intel_quote: base64(signedQuote({ rootSecret: STRANGER_SECRET, reportData: reportDataFor(good.signing_key as string, nonce) })) }) });
+    expect((await failureOf(sendChat(request(forged.fetch)))).detail).toBe("TDX quote: the certificate chain does not lead to Intel's root");
   });
 
   it('an answer that is not JSON, or far too long', async () => {
