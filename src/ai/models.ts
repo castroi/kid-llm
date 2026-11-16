@@ -49,6 +49,11 @@ export const MAX_MODEL_NAME_CHARS = 80;
 /** Printable ASCII with no spaces: what a model's name in a call looks like. */
 const MODEL_ID = /^[\x21-\x7e]+$/;
 
+/** A model's call name as it may be kept with an answer and shown: printable ASCII, no spaces, not over-long. */
+export function isModelId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= MAX_MODEL_ID_CHARS && MODEL_ID.test(value);
+}
+
 /** A control character, or a mark that changes the direction of the text around it. */
 function unshown(code: number): boolean {
   return code < 0x20 || (code >= 0x7f && code <= 0x9f) || code === 0x61c || code === 0x200e || code === 0x200f || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069);

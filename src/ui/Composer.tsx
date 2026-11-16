@@ -12,6 +12,8 @@ const PICKABLE = 'image/*,application/pdf,.pdf,application/vnd.openxmlformats-of
 
 export interface ComposerProps {
   mode: ModeId;
+  /** The model behind the mode, shown next to the mode's name; empty when the mode has none. */
+  model: string;
   writing: boolean;
   /** She can type, but can't send (the chat isn't set up yet). */
   blocked: boolean;
@@ -27,7 +29,7 @@ export interface ComposerProps {
 }
 
 /** Where she writes. Enter makes a new line, as on any phone keyboard; the button sends. */
-export function Composer({ mode, writing, blocked, attach, onSend, onStop, onPickMode }: ComposerProps) {
+export function Composer({ mode, model, writing, blocked, attach, onSend, onStop, onPickMode }: ComposerProps) {
   const [text, setText] = useState('');
   const [picked, setPicked] = useState<Attachment | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -121,6 +123,12 @@ export function Composer({ mode, writing, blocked, attach, onSend, onStop, onPic
               {/* The phone's own picker (photos, camera, files) opens from the button; this input is never seen. */}
               <input ref={picker} className="visually-hidden" type="file" accept={PICKABLE} tabIndex={-1} aria-label="קובץ לצירוף" onChange={(event) => void pick(event)} />
             </>
+          )}
+          {/* Outside the mode button, so the button is still named by its mode alone. */}
+          {model && (
+            <bdi dir="ltr" className="composer-model">
+              {model}
+            </bdi>
           )}
         </div>
         {writing ? (

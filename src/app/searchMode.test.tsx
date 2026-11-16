@@ -55,9 +55,8 @@ describe('search mode', () => {
     await say('מי המציא את הטלפון?');
     expect(requests[0].model).toBe('search-model');
     expect(requests[0].webSearch).toBe(true);
-    // The answer is marked with the mode's name, never the model's.
-    expect(screen.getByText(/חיפוש ·/)).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain('search-model');
+    // The answer is marked with the mode's name and the model's.
+    expect(screen.getByText(/חיפוש ·/).textContent).toMatch(/^חיפוש · search-model · /);
   });
 
   it("searches in a parent's own use too, and says the child baseline is to be left out", async () => {

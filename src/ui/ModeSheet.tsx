@@ -4,12 +4,14 @@ import { CheckIcon, ModeIcon } from './icons';
 
 export interface ModeSheetProps {
   mode: ModeId;
+  /** The model behind each mode, shown under the mode; empty for a mode that has none. */
+  models: Readonly<Record<ModeId, string>>;
   onPick: (mode: ModeId) => void;
   onClose: () => void;
 }
 
-/** The mode picker that slides up from the composer's chip. She sees modes, never model names. */
-export function ModeSheet({ mode, onPick, onClose }: ModeSheetProps) {
+/** The mode picker that slides up from the composer's chip. Each mode is shown with the model behind it. */
+export function ModeSheet({ mode, models, onPick, onClose }: ModeSheetProps) {
   const sheet = useRef<HTMLElement>(null);
 
   // Focus goes into the sheet when it opens and back to where it was when it closes.
@@ -50,6 +52,11 @@ export function ModeSheet({ mode, onPick, onClose }: ModeSheetProps) {
               <span className="sheet-row-text">
                 <span className="mode-name">{m.name}</span>
                 <span className="mode-description">{isReady(m.id) ? m.description : 'בקרוב'}</span>
+                {models[m.id] && (
+                  <bdi dir="ltr" className="mode-model">
+                    {models[m.id]}
+                  </bdi>
+                )}
               </span>
               {m.id === mode && (
                 <span className="sheet-check">

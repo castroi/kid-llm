@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { canAttachIn } from '../core/attachment';
 import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
-import { fileModelFor, missingFor } from '../storage/settings';
+import { fileModelFor, missingFor, modelFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
 import { Conversation } from '../ui/Conversation';
 import { HistoryDrawer } from '../ui/HistoryDrawer';
@@ -13,13 +13,15 @@ import type { ParentServices } from './parentServices';
 import { useChat, type Services } from './useChat';
 
 /** The chat screen: the opening with the modes, then the conversation, with the composer below. */
-/** What the screen needs to know about the setup: her name and which modes are ready, never the key itself. */
+/** What the screen needs to know about the setup: her name, which modes are ready and the model behind each, never the key itself. */
 function readSetup(services: Services) {
   const settings = services.loadSettings();
   const apiKey = services.loadApiKey(settings.provider);
   const notSetUp = MODES.filter((m) => missingFor(m.id, settings, apiKey) !== null).map((m) => m.id);
+  // The model each mode would be answered by now: none for an uncensored model while a child uses the app.
+  const models = Object.fromEntries(MODES.map((m) => [m.id, modelFor(m.id, settings)])) as Record<ModeId, string>;
   // She can attach a file only once the parent chose a model for files.
-  return { childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && fileModelFor(settings) !== '', parentUse: settings.parentUse === true };
+  return { models, childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && fileModelFor(settings) !== '', parentUse: settings.parentUse === true };
 }
 
 export function App({ services, parent }: { services: Services; parent: ParentServices }) {
@@ -136,6 +138,7 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
 
       <Composer
         mode={mode}
+        model={setup.models[mode]}
         writing={writing}
         blocked={blocked}
         attach={setup.filesReady && !blocked && canAttachIn(mode) ? services.prepareAttachment : null}
@@ -144,7 +147,7 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
         onPickMode={() => setPickingMode(true)}
       />
       </div>
-      {pickingMode && <ModeSheet mode={mode} onPick={setMode} onClose={() => setPickingMode(false)} />}
+      {pickingMode && <ModeSheet mode={mode} models={setup.models} onPick={setMode} onClose={() => setPickingMode(false)} />}
       {inHistory && (
         <HistoryDrawer
           currentId={chat.id}

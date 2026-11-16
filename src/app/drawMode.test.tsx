@@ -112,9 +112,8 @@ describe('drawing mode', () => {
     // No chat call is made, and nothing else of the settings goes with a picture request.
     expect(chats).toHaveLength(0);
     expect(JSON.stringify(pictures[0])).not.toContain('Be kind.');
-    // Marked with the mode's name, never the model's; nothing to copy, but she can ask again.
-    expect(screen.getByText(/ציור ·/)).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain('image-model');
+    // Marked with the mode's name and the model's; nothing to copy, but she can ask again.
+    expect(screen.getByText(/ציור ·/).textContent).toMatch(/^ציור · image-model · /);
     expect(screen.queryByRole('button', { name: 'העתקה' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'נסי שוב' })).toBeInTheDocument();
   });

@@ -134,8 +134,8 @@ describe('attaching a file', () => {
     // The waiting file is gone from the message box, and is shown inside her message.
     expect(screen.queryByRole('button', { name: 'הסרת הקובץ' })).not.toBeInTheDocument();
     expect(within(document.querySelector('.bubble') as HTMLElement).getByText('דף עבודה.pdf')).toBeInTheDocument();
-    // The answer is marked with the mode's name, never a model's.
-    expect(document.body.textContent).not.toContain('vision-model');
+    // The answer is marked with the mode's name and the model that wrote it: the one for files.
+    expect(screen.getByText(/^שיחה ·/).textContent).toMatch(/^שיחה · vision-model · /);
   });
 
   it("sends a file to the files' model in a parent's own use too, and says the child baseline is to be left out", async () => {
