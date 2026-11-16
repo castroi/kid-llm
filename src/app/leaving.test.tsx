@@ -525,7 +525,7 @@ describe('saving when the app leaves the screen', () => {
     expect(JSON.stringify([...store.chats.values()])).toBe(before);
   });
 
-  it("saves nothing in a parent's own use, and asks again still without the child instructions", async () => {
+  it("saves a parent's own chat as the parent's, half answers too, and asks again still without the child instructions", async () => {
     const store = memoryStore();
     // The app opens in a parent's own use, so nothing changes hands during the test.
     const { calls } = openApp({ store, settings: { ...SETTINGS, parentUse: true } });
@@ -533,7 +533,9 @@ describe('saving when the app leaves the screen', () => {
     await say('hello');
     await writes(calls[0], 'half an answer');
     leaveApp();
-    expect(store.chats.size).toBe(0);
+    expect(store.chats.size).toBe(1);
+    expect([...store.chats.values()][0].parentUse).toBe(true);
+    expect(lastSaved(store)).toMatchObject({ role: 'assistant', text: 'half an answer', state: 'failed' });
     comeBack();
     await breaks(calls[0]);
     await waitFor(() => expect(calls).toHaveLength(2));
@@ -541,7 +543,10 @@ describe('saving when the app leaves the screen', () => {
     await writes(calls[1], 'whole answer');
     await finishes(calls[1]);
     await settle();
-    expect(store.chats.size).toBe(0);
+    await waitFor(() => expect(lastSaved(store)).toMatchObject({ role: 'assistant', text: 'whole answer' }));
+    expect(lastSaved(store)).not.toHaveProperty('state');
+    expect(store.chats.size).toBe(1);
+    expect([...store.chats.values()][0].parentUse).toBe(true);
   });
 
   it("does not save a parent's half answer into one of her saved chats the parent opened", async () => {

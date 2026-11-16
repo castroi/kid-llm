@@ -35,16 +35,26 @@ export interface Chat {
   createdAt: number;
   updatedAt: number;
   messages: StoredMessage[];
+  /**
+   * The chat was written in a parent's own use, without the child instructions. Absent = hers.
+   * Such a chat is in the list and can be opened only while the app is in a parent's own use.
+   */
+  parentUse?: true;
 }
 
 /** What the list of chats shows. No messages, but `title` is the start of her first message, so it is hers too. */
-export type ChatSummary = Pick<Chat, 'id' | 'title' | 'mode' | 'createdAt' | 'updatedAt'>;
+export type ChatSummary = Pick<Chat, 'id' | 'title' | 'mode' | 'createdAt' | 'updatedAt' | 'parentUse'>;
 
 export const UNTITLED = 'שיחה חדשה';
 const TITLE_CHARS = 40;
 
-export function newChat(mode: ModeId, now: number, id: string = crypto.randomUUID()): Chat {
-  return { id, title: UNTITLED, mode, createdAt: now, updatedAt: now, messages: [] };
+export function newChat(mode: ModeId, now: number, id: string = crypto.randomUUID(), parentUse = false): Chat {
+  return { id, title: UNTITLED, mode, createdAt: now, updatedAt: now, messages: [], ...(parentUse ? { parentUse: true as const } : {}) };
+}
+
+/** What the list of chats shows of a chat. */
+export function summaryOf({ id, title, mode, createdAt, updatedAt, parentUse }: Chat): ChatSummary {
+  return { id, title, mode, createdAt, updatedAt, ...(parentUse === true ? { parentUse: true as const } : {}) };
 }
 
 /** A chat's name in the list: the start of her first message, on one line. */
@@ -181,5 +191,7 @@ export function sanitizeChat(raw: unknown): Chat | null {
     createdAt: value.createdAt,
     updatedAt: isTime(value.updatedAt) ? value.updatedAt : value.createdAt,
     messages,
+    // Only the exact mark a parent's own chat is saved with; anything else is one of her chats.
+    ...(value.parentUse === true ? { parentUse: true as const } : {}),
   };
 }

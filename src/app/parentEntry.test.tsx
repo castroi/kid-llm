@@ -135,23 +135,38 @@ describe('the way into the parent area', () => {
     await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
     await waitFor(() => expect(screen.getAllByText('היי!')).toHaveLength(1));
     expect(requests[1].kidUse).toBe(false);
-    // Nothing of the parent's chat was written to the phone, and the screen says so.
-    expect(JSON.stringify([...store.chats.values()])).toBe(hers);
-    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+    // The parent's chat is saved as a chat of its own, marked as the parent's; hers is untouched.
+    const ofParent = () => [...store.chats.values()].filter((chat) => chat.parentUse === true);
+    const ofHers = () => [...store.chats.values()].filter((chat) => chat.parentUse !== true);
+    await waitFor(() => expect(ofParent()[0]?.messages.map((m) => m.text)).toEqual(['hello', 'היי!']));
+    expect(ofParent()).toHaveLength(1);
+    expect(JSON.stringify(ofHers())).toBe(hers);
+    expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
+    // The parent's list holds both chats.
+    await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
+    expect(await screen.findByRole('button', { name: /^hello/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'שאלה של ילדה' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'סגירת הרשימה' }));
 
-    // Back to her: the parent's chat leaves the screen too, and is in no list.
+    // Back to her: the parent's chat leaves the screen, and is not in her list.
     await userEvent.click(await enter());
     await leave();
     expect(screen.queryByRole('note')).not.toBeInTheDocument();
     expect(screen.queryByText('hello', { selector: '.bubble' })).not.toBeInTheDocument();
     expect(screen.queryByText('היי!')).not.toBeInTheDocument();
     expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'השיחות שלי' }));
+    expect(await screen.findByRole('button', { name: 'שאלה של ילדה' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^hello/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'סגירת הרשימה' }));
     await userEvent.type(screen.getByLabelText('הודעה'), 'again');
     await userEvent.click(screen.getByRole('button', { name: 'שליחה' }));
     await waitFor(() => expect(requests).toHaveLength(3));
     expect(requests[2]).not.toHaveProperty('kidUse');
-    await waitFor(() => expect(store.chats.size).toBe(2));
-    expect(JSON.stringify([...store.chats.values()])).not.toContain('hello');
+    // Her new chat is hers; nothing of the parent's is in any chat of hers.
+    await waitFor(() => expect(store.chats.size).toBe(3));
+    expect(ofParent()).toHaveLength(1);
+    expect(JSON.stringify(ofHers())).not.toContain('hello');
   });
 
   it("does not save what a parent adds to one of her saved chats in a parent's own use", async () => {

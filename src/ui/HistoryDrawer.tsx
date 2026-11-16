@@ -117,6 +117,8 @@ export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, o
                         <span className="drawer-chat-title" dir="auto">
                           {chat.title}
                         </span>
+                        {/* Only a parent gets a list with both kinds of chats; the mark tells them apart. */}
+                        {chat.parentUse === true && <span className="drawer-chat-tag">הורים</span>}
                       </button>
                       <button type="button" className="icon-button" aria-label={`אפשרויות לשיחה: ${chat.title}`} aria-expanded={editing?.id === chat.id} onClick={() => toggleMenu(chat)}>
                         <MoreIcon />

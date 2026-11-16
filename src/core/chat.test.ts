@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAX_CONTEXT_CHARS, newChat, sanitizeChat, titleFrom, toProviderMessages, UNTITLED, withMessage, withNewestFileRefused, withUpdatedMessage, type StoredMessage } from './chat';
+import { MAX_CONTEXT_CHARS, newChat, sanitizeChat, summaryOf, titleFrom, toProviderMessages, UNTITLED, withMessage, withNewestFileRefused, withUpdatedMessage, type StoredMessage } from './chat';
 
 let counter = 0;
 function message(role: StoredMessage['role'], text: string, extra: Partial<StoredMessage> = {}): StoredMessage {
@@ -134,6 +134,17 @@ describe('sanitizeChat', () => {
   it('leaves a good chat as it is', () => {
     expect(sanitizeChat(good)).toEqual(good);
     expect(sanitizeChat({ ...good, messages: [...good.messages, message('assistant', 'חצי', { state: 'stopped' })] })?.messages[1].state).toBe('stopped');
+  });
+
+  it("keeps the mark of a parent's own chat only when it is exactly that mark", () => {
+    expect(newChat('chat', 1, 'p1', true)).toEqual({ id: 'p1', title: UNTITLED, mode: 'chat', createdAt: 1, updatedAt: 1, messages: [], parentUse: true });
+    expect(sanitizeChat({ ...good, parentUse: true })).toEqual({ ...good, parentUse: true });
+    for (const mark of [false, 'true', 1, null, {}]) expect(sanitizeChat({ ...good, parentUse: mark })).toEqual(good);
+    // The list learns whose chat it is, and nothing of its messages.
+    expect(summaryOf({ ...good, parentUse: true })).toEqual({ id: 'c1', title: good.title, mode: 'math', createdAt: 100, updatedAt: good.updatedAt, parentUse: true });
+    expect(summaryOf(good)).toEqual({ id: 'c1', title: good.title, mode: 'math', createdAt: 100, updatedAt: good.updatedAt });
+    // Adding a message keeps the mark.
+    expect(withMessage(newChat('chat', 1, 'p1', true), message('user', 'hello')).parentUse).toBe(true);
   });
 
   it('drops fields it does not know, so a key or anything else cannot ride along', () => {

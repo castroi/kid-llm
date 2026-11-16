@@ -963,6 +963,14 @@ textarea.input {
   white-space: nowrap;
 }
 
+/* Marks a chat of a parent's own use in the list a parent sees. */
+.drawer-chat-tag {
+  flex: none;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--danger);
+}
+
 .drawer-actions {
   padding: 4px 6px 12px;
 }

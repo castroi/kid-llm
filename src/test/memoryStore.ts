@@ -1,4 +1,4 @@
-import type { Chat } from '../core/chat';
+import { summaryOf, type Chat } from '../core/chat';
 import type { ChatStore } from '../storage/chatStore';
 
 /** A phone's chat storage in memory. Like the real one, changes take effect in the order they were asked for. */
@@ -9,7 +9,7 @@ export function memoryStore(initial: Chat[] = []): ChatStore & { chats: Map<stri
     list: async () =>
       [...chats.values()]
         .sort((a, b) => b.updatedAt - a.updatedAt)
-        .map(({ id, title, mode, createdAt, updatedAt }) => ({ id, title, mode, createdAt, updatedAt })),
+        .map(summaryOf),
     get: (id) => Promise.resolve(chats.get(id)),
     all: async () => [...chats.values()],
     save: (chat) => {

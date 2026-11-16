@@ -1,8 +1,9 @@
-import { sanitizeChat, type Chat, type ChatSummary } from '../core/chat';
+import { sanitizeChat, summaryOf, type Chat, type ChatSummary } from '../core/chat';
 
 /**
- * Her chats, kept in this browser's IndexedDB: on the phone only, never sent to the
- * website. Each chat is one record with its messages. The API key is NOT here
+ * Her chats, and the chats of a parent's own use (marked `parentUse`), kept in this browser's
+ * IndexedDB: on the phone only, never sent to the website. Each chat is one record with its messages.
+ * The store gives every chat; which of them she may see is decided in src/app/useChat.ts. The API key is NOT here
  * (src/storage/settings.ts), so a backup of the chats can never carry it.
  */
 export interface ChatStore {
@@ -23,7 +24,7 @@ export interface ChatStore {
    * that lands just before or after can't be lost. Says whether the chat was there.
    */
   rename(id: string, title: string): Promise<boolean>;
-  /** Deletes every chat ("מחיקת כל השיחות" in the parent area). There is no deleting one chat: she can't, by design. */
+  /** Deletes every chat, hers and a parent's own ("מחיקת כל השיחות" in the parent area). There is no deleting one chat: she can't, by design. */
   clear(): Promise<void>;
   close(): void;
 }
@@ -87,10 +88,6 @@ function openDb(factory: IDBFactory, timeoutMs: number): Promise<IDBDatabase> {
   });
 }
 
-function summary({ id, title, mode, createdAt, updatedAt }: Chat): ChatSummary {
-  return { id, title, mode, createdAt, updatedAt };
-}
-
 /** Opens (and on first use creates) the chat store. Rejects when the browser has no usable storage. */
 export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: number = OPEN_TIMEOUT_MS): Promise<ChatStore> {
   const db = await openDb(factory, timeoutMs);
@@ -121,7 +118,7 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
         const cursor = walk.result;
         if (!cursor) return;
         const chat = sanitizeChat(cursor.value);
-        if (chat) summaries.push(summary(chat));
+        if (chat) summaries.push(summaryOf(chat));
         cursor.continue();
       };
       await done;
