@@ -54,7 +54,7 @@ export function importText({ added, addedParent, kept, unreadable, ended }: Impo
   const lines = [addedLine(added, addedParent)];
   if (kept > 0) lines.push(kept === 1 ? 'שיחה אחת כבר הייתה באייפון ולא שונתה.' : `${kept} שיחות כבר היו באייפון ולא שונו.`);
   if (unreadable > 0) lines.push(unreadable === 1 ? 'רשומה אחת בקובץ היא לא שיחה, ודילגנו עליה.' : `${unreadable} רשומות בקובץ הן לא שיחות, ודילגנו עליהן.`);
-  if (ended === 'cut') lines.push('הקובץ קטוע או פגום, ולכן השיחות שבסופו לא יובאו. השיחות שלפני כן נוספו.');
+  if (ended === 'cut') lines.push(added > 0 ? 'הקובץ קטוע או פגום, ולכן השיחות שבסופו לא יובאו. השיחות שלפני כן נוספו.' : 'הקובץ קטוע או פגום, ולכן השיחות שבסופו לא יובאו.');
   if (ended === 'not-saved') lines.push('הייבוא נעצר כי האייפון לא שמר שיחה. ייתכן שהאחסון מלא.');
   return lines.join(' ');
 }

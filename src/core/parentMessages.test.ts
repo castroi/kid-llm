@@ -40,6 +40,8 @@ describe('what the parent is told', () => {
     expect(importText({ ...none, added: 1, kept: 1, unreadable: 1 })).toBe('נוספה שיחה אחת, שלה. שיחה אחת כבר הייתה באייפון ולא שונתה. רשומה אחת בקובץ היא לא שיחה, ודילגנו עליה.');
     expect(importText({ ...none, added: 0, kept: 4, unreadable: 2 })).toBe('לא נוספו שיחות. 4 שיחות כבר היו באייפון ולא שונו. 2 רשומות בקובץ הן לא שיחות, ודילגנו עליהן.');
     expect(importText({ ...none, added: 2, ended: 'cut' })).toBe('נוספו 2 שיחות, כולן שלה. הקובץ קטוע או פגום, ולכן השיחות שבסופו לא יובאו. השיחות שלפני כן נוספו.');
+    // Nothing added: the line doesn't say that what came before was.
+    expect(importText({ ...none, added: 0, kept: 1, ended: 'cut' })).toBe('לא נוספו שיחות. שיחה אחת כבר הייתה באייפון ולא שונתה. הקובץ קטוע או פגום, ולכן השיחות שבסופו לא יובאו.');
     expect(importText({ ...none, added: 2, ended: 'not-saved' })).toContain('האחסון מלא');
   });
 

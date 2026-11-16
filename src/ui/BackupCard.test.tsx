@@ -51,7 +51,8 @@ describe('backup in the parent area', () => {
     await save();
     expect(await screen.findByText(text)).toBeInTheDocument();
     // Not handed over: the file is still there to try again.
-    if (handOver !== 'downloaded') expect(screen.getByRole('button', { name: 'שמירת הקובץ' })).toBeInTheDocument();
+    if (handOver === 'downloaded') expect(screen.queryByRole('button', { name: 'שמירת הקובץ' })).toBeNull();
+    else expect(screen.getByRole('button', { name: 'שמירת הקובץ' })).toBeInTheDocument();
   });
 
   it('with no chats there is nothing to hand over', async () => {
