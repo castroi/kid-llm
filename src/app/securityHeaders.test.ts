@@ -67,3 +67,19 @@ describe('security headers (vercel.json)', () => {
     expect(header('Strict-Transport-Security')).toBe('max-age=63072000; includeSubDomains');
   });
 });
+
+describe('caching (vercel.json)', () => {
+  const cacheControl = (source: string) => vercel.headers.find((rule) => rule.source === source)?.headers.find((h) => h.key === 'Cache-Control')?.value;
+
+  it('never keeps the version file, so an open app learns of a new version as soon as it is deployed', () => {
+    expect(cacheControl('/version.json')).toBe('no-store');
+  });
+
+  it('checks the page with the site before every use, so "לעדכן" loads the new version and not a kept copy', () => {
+    expect(cacheControl('/')).toBe('no-cache');
+  });
+
+  it('keeps the built files for good: their names change with every build', () => {
+    expect(cacheControl('/assets/(.*)')).toBe('public, max-age=31536000, immutable');
+  });
+});

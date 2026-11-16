@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import { versionFile } from './src/core/versionFile';
 import vercel from './vercel.json';
 
 /**
@@ -29,7 +30,7 @@ const commit = process.env.VERCEL_GIT_COMMIT_SHA || head;
 const commitDate = commit !== '' && commit === head ? fromGit('%cI') : '';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), versionFile(commit)],
   define: {
     __APP_COMMIT__: JSON.stringify(commit),
     __APP_COMMIT_DATE__: JSON.stringify(commitDate),

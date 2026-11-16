@@ -26,10 +26,12 @@ export interface ComposerProps {
   onSend: (text: string, attachment?: Attachment) => boolean;
   onStop: () => void;
   onPickMode: () => void;
+  /** Told whether she has started a message: text in the box, or a file picked or being made ready. */
+  onDraftChange?: (started: boolean) => void;
 }
 
 /** Where she writes. Enter makes a new line, as on any phone keyboard; the button sends. */
-export function Composer({ mode, model, writing, blocked, attach, onSend, onStop, onPickMode }: ComposerProps) {
+export function Composer({ mode, model, writing, blocked, attach, onSend, onStop, onPickMode, onDraftChange }: ComposerProps) {
   const [text, setText] = useState('');
   const [picked, setPicked] = useState<Attachment | null>(null);
   const [preparing, setPreparing] = useState(false);
@@ -38,6 +40,11 @@ export function Composer({ mode, model, writing, blocked, attach, onSend, onStop
   const picker = useRef<HTMLInputElement>(null);
   // A file picked where files can go doesn't follow her into a mode where they can't.
   const attachment = attach ? picked : null;
+
+  const started = text.trim() !== '' || attachment !== null || preparing;
+  useEffect(() => {
+    onDraftChange?.(started);
+  }, [started, onDraftChange]);
 
   // Grows with the text up to a few lines, then scrolls inside.
   useEffect(() => {
