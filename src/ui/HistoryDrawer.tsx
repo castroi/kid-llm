@@ -114,8 +114,16 @@ export function HistoryDrawer({ currentId, saved, now, list, onOpen, onRename, o
                           <ModeIcon mode={chat.mode} size={22} />
                         </span>
                         {/* Her own words: shown as text, in the direction of the language she wrote in. */}
-                        <span className="drawer-chat-title" dir="auto">
-                          {chat.title}
+                        <span className="drawer-chat-text">
+                          <span className="drawer-chat-title" dir="auto">
+                            {chat.title}
+                          </span>
+                          {/* The model that wrote the chat's newest answer. Left out of the button's name, which stays the chat's name alone. */}
+                          {chat.model && (
+                            <bdi dir="ltr" className="drawer-chat-model" aria-hidden="true">
+                              {chat.model}
+                            </bdi>
+                          )}
                         </span>
                         {/* Only a parent gets a list with both kinds of chats; the mark tells them apart. */}
                         {chat.parentUse === true && <span className="drawer-chat-tag">הורים</span>}

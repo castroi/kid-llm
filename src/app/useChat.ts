@@ -160,7 +160,16 @@ export function useChat(services: Services): ChatController {
    */
   const attempt = useCallback(
     async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[], countOnFirstPiece: boolean, mayResume: boolean): Promise<Cut | null> => {
-      const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode };
+      // What a chat call carries. A search call carries only what she wrote in search mode (and
+      // its answers): what she said in other modes of the same chat is not handed to a search engine.
+      const talk = forMode === 'draw' ? [] : toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages);
+      // A call that carries a file goes to the model the parent chose for files. With none
+      // chosen (the parent took it away since), the file stays on the phone and only the text goes.
+      const fileModel = canAttachIn(forMode) ? fileModelFor(settings) : '';
+      const withFile = fileModel !== '' && talk.some((m) => m.file !== undefined);
+      // The model this call goes to; its name is kept with the answer and shown under it.
+      const model = withFile ? fileModel : modelFor(forMode, settings);
+      const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode, ...(model ? { model } : {}) };
       let current = withMessage(base, reply);
       let text = '';
       let image: GeneratedImage | undefined;
@@ -173,14 +182,6 @@ export function useChat(services: Services): ChatController {
       const write = (state?: StoredMessage['state']) => put(withUpdatedMessage(current, { ...reply, text, ...(image ? { image } : {}), ...(sources ? { sources } : {}), ...(state ? { state } : {}) }));
       // Nothing new was written: the empty answer goes, and an answer this call was meant to replace comes back.
       const drop = () => put({ ...current, messages: [...base.messages, ...replaced] });
-
-      // What a chat call carries. A search call carries only what she wrote in search mode (and
-      // its answers): what she said in other modes of the same chat is not handed to a search engine.
-      const talk = forMode === 'draw' ? [] : toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages);
-      // A call that carries a file goes to the model the parent chose for files. With none
-      // chosen (the parent took it away since), the file stays on the phone and only the text goes.
-      const fileModel = canAttachIn(forMode) ? fileModelFor(settings) : '';
-      const withFile = fileModel !== '' && talk.some((m) => m.file !== undefined);
 
       const controller = new AbortController();
       stopper.current = controller;
@@ -206,7 +207,7 @@ export function useChat(services: Services): ChatController {
           // A picture is made from her last message alone; nothing else of the chat is sent.
           image = await services.generateImage({
             provider: settings.provider,
-            model: modelFor('draw', settings),
+            model,
             prompt: base.messages[base.messages.length - 1].text,
             apiKey,
             signal: controller.signal,
@@ -214,7 +215,6 @@ export function useChat(services: Services): ChatController {
           // Another picture for the same request counts toward the day once it really arrives.
           if (countOnFirstPiece) count();
         } else {
-          const model = withFile ? fileModel : modelFor(forMode, settings);
           const result = await services.sendChat({
             provider: settings.provider,
             model,

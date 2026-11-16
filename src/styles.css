@@ -220,6 +220,32 @@ button:disabled {
   font-size: 15px;
 }
 
+/* A model's name, wherever it is shown: the smallest text the app uses, quiet, cut with "…" when it has no room. */
+.mode-model,
+.composer-model,
+.drawer-chat-model {
+  font-size: 15px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+/* In the mode picker there is room: a long name goes on to the next line. */
+.mode-model {
+  overflow-wrap: anywhere;
+}
+
+.composer-model,
+.drawer-chat-model {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-model {
+  padding-inline-start: 4px;
+}
+
 /* Conversation */
 .conversation {
   display: flex;
@@ -955,9 +981,20 @@ textarea.input {
   color: var(--accent);
 }
 
-.drawer-chat-title {
+.drawer-chat-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Under the chat's name, at the side the list starts from. */
+.drawer-chat-model {
+  align-self: flex-start;
+  max-width: 100%;
+}
+
+.drawer-chat-title {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

@@ -1,3 +1,4 @@
+import { isModelId } from '../ai/models';
 import { IMAGE_TYPES, MAX_IMAGE_BYTES, type ChatMessage, type GeneratedImage, type ImageType } from '../ai/providers';
 import { sanitizeSources, type Source } from '../ai/sources';
 import { MODES, type ModeId } from './modes';
@@ -11,8 +12,10 @@ export interface StoredMessage {
   text: string;
   /** When it was written, in milliseconds since 1970. */
   at: number;
-  /** The mode she was in; shown under an answer instead of a model name. */
+  /** The mode she was in; shown under an answer, next to the model's name. */
   mode: ModeId;
+  /** The model that wrote this answer, by the name it is called with. Absent on her messages and on answers kept before this was. Shown only, never sent. */
+  model?: string;
   /** A picture or a document she attached to this message of hers. Its bytes are kept with the chat, on the phone only. */
   attachment?: Attachment;
   /**
@@ -42,8 +45,11 @@ export interface Chat {
   parentUse?: true;
 }
 
-/** What the list of chats shows. No messages, but `title` is the start of her first message, so it is hers too. */
-export type ChatSummary = Pick<Chat, 'id' | 'title' | 'mode' | 'createdAt' | 'updatedAt' | 'parentUse'>;
+/**
+ * What the list of chats shows. No messages, but `title` is the start of her first message, so it is hers too.
+ * `model` is the model that wrote the chat's newest answer, when that is known.
+ */
+export type ChatSummary = Pick<Chat, 'id' | 'title' | 'mode' | 'createdAt' | 'updatedAt' | 'parentUse'> & { model?: string };
 
 export const UNTITLED = 'שיחה חדשה';
 const TITLE_CHARS = 40;
@@ -53,8 +59,10 @@ export function newChat(mode: ModeId, now: number, id: string = crypto.randomUUI
 }
 
 /** What the list of chats shows of a chat. */
-export function summaryOf({ id, title, mode, createdAt, updatedAt, parentUse }: Chat): ChatSummary {
-  return { id, title, mode, createdAt, updatedAt, ...(parentUse === true ? { parentUse: true as const } : {}) };
+export function summaryOf({ id, title, mode, createdAt, updatedAt, parentUse, messages }: Chat): ChatSummary {
+  let model: string | undefined;
+  for (let i = messages.length - 1; i >= 0 && model === undefined; i--) model = messages[i].model;
+  return { id, title, mode, createdAt, updatedAt, ...(parentUse === true ? { parentUse: true as const } : {}), ...(model ? { model } : {}) };
 }
 
 /** A chat's name in the list: the start of her first message, on one line. */
@@ -177,6 +185,8 @@ export function sanitizeChat(raw: unknown): Chat | null {
     const attachment = sanitizeAttachment(m.attachment);
     if (attachment && m.role === 'user' && canAttachIn(message.mode)) message.attachment = attachment;
     if (m.state === 'stopped' || m.state === 'failed') message.state = m.state;
+    // Shown on the screen, so checked like anything stored: an answer's only, and only what a model's name looks like.
+    if (m.role === 'assistant' && isModelId(m.model)) message.model = m.model;
     const image = sanitizeImage(m.image);
     if (image && m.role === 'assistant') message.image = image;
     // Checked again like anything stored: only https addresses, and only on a search answer.

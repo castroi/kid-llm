@@ -91,6 +91,17 @@ function Sources({ sources }: { sources: readonly Source[] }) {
   );
 }
 
+/** The model that wrote an answer, after the mode's name: a name in Latin letters, so left to right. Nothing for an answer kept before names were. */
+function ModelName({ model }: { model?: string }) {
+  if (!model) return null;
+  return (
+    <>
+      {' · '}
+      <bdi dir="ltr">{model}</bdi>
+    </>
+  );
+}
+
 function Answer({ message, writing, last, onRetry, copyText, links }: { message: StoredMessage; writing: boolean; last: boolean; onRetry: () => void; copyText: (text: string) => Promise<void>; links: boolean }) {
   const beingWritten = writing && last;
   return (
@@ -107,7 +118,8 @@ function Answer({ message, writing, last, onRetry, copyText, links }: { message:
       {!beingWritten && message.sources && message.sources.length > 0 && <Sources sources={message.sources} />}
       {beingWritten ? (
         <p className="answer-meta">
-          {modeName(message.mode)} · {message.mode === 'draw' ? 'זה לוקח כמה שניות' : 'כותבת עכשיו'}
+          {modeName(message.mode)}
+          <ModelName model={message.model} /> · {message.mode === 'draw' ? 'זה לוקח כמה שניות' : 'כותבת עכשיו'}
         </p>
       ) : (
         <div className="answer-actions">
@@ -119,7 +131,8 @@ function Answer({ message, writing, last, onRetry, copyText, links }: { message:
             </button>
           )}
           <span className="answer-meta">
-            {modeName(message.mode)} · <bdi dir="ltr">{clock.format(message.at)}</bdi>
+            {modeName(message.mode)}
+            <ModelName model={message.model} /> · <bdi dir="ltr">{clock.format(message.at)}</bdi>
             {message.state === 'stopped' && ' · עצרת כאן'}
             {message.state === 'failed' && ' · התשובה נקטעה'}
           </span>

@@ -147,6 +147,20 @@ describe('sanitizeChat', () => {
     expect(withMessage(newChat('chat', 1, 'p1', true), message('user', 'hello')).parentUse).toBe(true);
   });
 
+  it("keeps the name of the model that wrote an answer, and only what a model's name looks like", () => {
+    const withAnswer = (model: unknown, role: 'user' | 'assistant' = 'assistant') => sanitizeChat({ ...good, messages: [...good.messages, { ...message(role, '4'), model }] });
+    expect(withAnswer('deepseek-4-1')?.messages[1].model).toBe('deepseek-4-1');
+    // Her own message has no model, and a name that could not be a model's is dropped.
+    expect(withAnswer('deepseek-4-1', 'user')?.messages[1]).not.toHaveProperty('model');
+    for (const bad of ['', 'two words', 'שם', 'a\u202eb', 'x'.repeat(201), 7, null, {}]) expect(withAnswer(bad)?.messages[1]).not.toHaveProperty('model');
+  });
+
+  it("gives the list the model of the chat's newest answer that has one", () => {
+    const answered = { ...good, messages: [...good.messages, message('assistant', '4', { model: 'first-model' }), message('user', 'ועוד 1?'), message('assistant', '5', { model: 'second-model' }), message('user', 'תודה')] };
+    expect(summaryOf(answered).model).toBe('second-model');
+    expect(summaryOf(good)).not.toHaveProperty('model');
+  });
+
   it('drops fields it does not know, so a key or anything else cannot ride along', () => {
     const clean = sanitizeChat({ ...good, apiKey: 'sk-secret', messages: [{ ...good.messages[0], apiKey: 'sk-secret', extra: 1 }] });
     expect(JSON.stringify(clean)).not.toContain('sk-secret');

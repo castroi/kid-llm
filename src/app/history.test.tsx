@@ -167,6 +167,17 @@ describe('the list of chats', () => {
     expect(list.getByRole('button', { name: 'שיחה ישנה' })).not.toHaveAttribute('aria-current');
   });
 
+  it("shows the model of a chat's newest answer under its name, and none for a chat kept without one", async () => {
+    openApp(memoryStore([savedChat('old', 'שיחה ישנה', NOW - DAY)]));
+    await say('שלום');
+    await screen.findByText('היי!');
+    const list = await openList();
+    // The button is still named by the chat's name alone.
+    const row = await list.findByRole('button', { name: 'שלום' });
+    await waitFor(() => expect(row.querySelector('.drawer-chat-model')).toHaveTextContent('m'));
+    expect(list.getByRole('button', { name: 'שיחה ישנה' }).querySelector('.drawer-chat-model')).toBeNull();
+  });
+
   it('starts a new chat from the list', async () => {
     openApp(memoryStore());
     await say('שלום');

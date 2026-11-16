@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { filterModels, looksUncensored, MAX_MODEL_ID_CHARS, MAX_MODEL_NAME_CHARS, MAX_MODELS, modelsFor, priceText, sanitizeModels, type ModelInfo } from './models';
+import { filterModels, isModelId, looksUncensored, MAX_MODEL_ID_CHARS, MAX_MODEL_NAME_CHARS, MAX_MODELS, modelsFor, priceText, sanitizeModels, type ModelInfo } from './models';
 
 /** One model as Venice's list gives it. */
 function entry(id: string, spec: Record<string, unknown> = {}, type = 'text') {
@@ -81,6 +81,14 @@ describe('sanitizeModels', () => {
     for (const raw of [null, undefined, 'models', 5, [], {}, { data: 'x' }, { data: {} }]) expect(sanitizeModels(raw, 'text')).toEqual([]);
     const many = { data: Array.from({ length: MAX_MODELS + 5 }, (_, n) => entry(`m-${n}`)) };
     expect(sanitizeModels(many, 'text')).toHaveLength(MAX_MODELS);
+  });
+});
+
+describe('isModelId', () => {
+  it("takes only what a model's call name looks like", () => {
+    expect(isModelId('deepseek-4-1')).toBe(true);
+    expect(isModelId('x'.repeat(MAX_MODEL_ID_CHARS))).toBe(true);
+    for (const bad of ['', 'two words', 'שם', 'line\nbreak', 'x'.repeat(MAX_MODEL_ID_CHARS + 1), 7, null, undefined]) expect(isModelId(bad)).toBe(false);
   });
 });
 

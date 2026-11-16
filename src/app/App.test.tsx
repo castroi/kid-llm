@@ -108,12 +108,17 @@ async function say(text: string) {
 }
 
 describe('opening screen', () => {
-  it('greets her by name and shows every mode by its name, never a model name', () => {
+  it("greets her by name, shows every mode by its name, and the chosen mode's model where she writes", () => {
     open();
     expect(screen.getByRole('heading', { name: 'היי נועה, על מה נדבר היום?' })).toBeInTheDocument();
     const modes = within(screen.getByRole('group', { name: 'מצב' })).getAllByRole('button');
     expect(modes.map((m) => m.textContent)).toEqual(['שיחהלדבר על כל דבר', 'חיפושלמצוא תשובות באינטרנט', 'חשבוןעזרה בתרגילים', 'ציורליצור תמונה']);
-    expect(document.body.textContent).not.toContain('model-');
+    expect(document.querySelector('.composer-model')).toHaveTextContent('model-chat');
+  });
+
+  it('shows no model for a mode that has none', () => {
+    open({ settings: { models: { chat: '', search: '', math: '', draw: '' } } });
+    expect(document.querySelector('.composer-model')).toBeNull();
   });
 
   it('greets without a name when the parent gave none', () => {
@@ -198,24 +203,33 @@ describe('chatting', () => {
     expect(JSON.stringify(requests[0])).not.toContain('נועה');
   });
 
-  it('shows the mode under an answer, never the model', async () => {
-    open();
+  it('shows the mode and the model under an answer, and keeps the model with the answer', async () => {
+    const store = fakeStore();
+    open({ store });
     await say('שלום');
     await screen.findByText('היי לך!');
-    expect(screen.getByText(/^שיחה ·/)).toBeInTheDocument();
-    expect(document.body.textContent).not.toContain('model-chat');
+    expect(screen.getByText(/^שיחה ·/).textContent).toMatch(/^שיחה · model-chat · /);
+    await waitFor(() => expect(store.updated.at(-1)?.messages.at(-1)).toMatchObject({ role: 'assistant', model: 'model-chat' }));
+    // Her own message has no model.
+    expect(store.updated.at(-1)?.messages[0]).not.toHaveProperty('model');
   });
 
   it('uses the model of the mode she picked from the sheet', async () => {
     const { requests } = open();
     await userEvent.click(screen.getByRole('button', { name: 'שיחה' }));
     const sheet = within(screen.getByRole('dialog', { name: 'במה להשתמש עכשיו?' }));
+    // Each mode is shown with the model behind it.
+    expect(within(sheet.getByRole('button', { name: /חיפוש/ })).getByText('model-search')).toBeInTheDocument();
+    expect(within(sheet.getByRole('button', { name: /ציור/ })).getByText('model-draw')).toBeInTheDocument();
+    expect(document.querySelector('.composer-model')).toHaveTextContent('model-chat');
     await userEvent.click(sheet.getByRole('button', { name: /חשבון/ }));
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    // The name where she writes follows the mode.
+    expect(document.querySelector('.composer-model')).toHaveTextContent('model-math');
     await say('כמה זה 2+2?');
     await screen.findByText('היי לך!');
     expect(requests[0].model).toBe('model-math');
-    expect(screen.getByText(/^חשבון ·/)).toBeInTheDocument();
+    expect(screen.getByText(/^חשבון ·/).textContent).toMatch(/^חשבון · model-math · /);
   });
 
   it('keeps the screen behind the mode sheet out of reach, closes on Escape and gives the focus back', async () => {
@@ -287,7 +301,7 @@ describe('stopping', () => {
     const { requests } = open({ send: hangsAfter('פעם אחת ') });
     await say('ספרי סיפור');
     expect(await screen.findByText('פעם אחת')).toBeInTheDocument();
-    expect(screen.getByText('שיחה · כותבת עכשיו')).toBeInTheDocument();
+    expect(screen.getByText(/כותבת עכשיו/).textContent).toBe('שיחה · model-chat · כותבת עכשיו');
     expect(screen.queryByRole('button', { name: 'שליחה' })).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole('button', { name: 'עצירה' }));
