@@ -553,6 +553,17 @@ describe('data on the phone', () => {
     expect(phone.sent).toBe(0);
   });
 
+  it('offers backup only behind the code', async () => {
+    open({ pin: '2468' });
+    expect(screen.queryByRole('heading', { name: 'גיבוי השיחות' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'הכנת קובץ גיבוי' })).toBeNull();
+
+    await userEvent.type(screen.getByLabelText('קוד הורים'), '2468');
+    await userEvent.click(screen.getByRole('button', { name: 'כניסה' }));
+    expect(await screen.findByRole('heading', { name: 'גיבוי השיחות' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'ייבוא מקובץ גיבוי' })).toBeInTheDocument();
+  });
+
   it('deletes every chat only after the parent confirms', async () => {
     const { phone, onChatsDeleted } = await openSettings();
     await userEvent.click(screen.getByRole('button', { name: 'מחיקת כל השיחות' }));

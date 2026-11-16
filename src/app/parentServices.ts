@@ -1,6 +1,8 @@
 import type { AiProviderId } from '../ai/catalog';
 import type { ModelInfo } from '../ai/models';
+import type { BackupSource, ImportResult } from '../core/backup';
 import type { AppVersion } from '../core/version';
+import type { Backup, HandOver } from '../storage/backup';
 import type { PinResult } from '../storage/pin';
 import type { Settings } from '../storage/settings';
 
@@ -32,6 +34,12 @@ export interface ParentServices {
   resetUsage: () => boolean;
   /** Removes every chat from the phone. Rejects when it could not. */
   deleteAllChats: () => Promise<void>;
+  /** Every chat on the phone as one backup file. Never the key, the code or the settings. Rejects when the chats can't be read. */
+  makeBackup: () => Promise<Backup>;
+  /** Hands a made backup to the parent: the share sheet where it takes files, a download elsewhere. Called straight from a tap. */
+  saveBackup: (backup: Backup) => Promise<HandOver>;
+  /** Adds a backup file's chats to the phone; chats already here are left as they are. Rejects with BackupError for a file that is no backup. */
+  importBackup: (file: BackupSource) => Promise<ImportResult>;
   /** Which build of the app is on this phone. */
   version: AppVersion;
 }

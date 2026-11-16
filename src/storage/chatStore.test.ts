@@ -83,6 +83,22 @@ describe('chat store', () => {
     expect(await store.all()).toEqual([]);
   });
 
+  it('adds a chat only when its id is free: a chat that is already there is never replaced', async () => {
+    const store = await openChatStore(new IDBFactory());
+    const mine = chat('c1', 100, 'מה שיש באייפון');
+    await store.save(mine);
+
+    expect(await store.add(chat('c1', 999, 'מה שיש בקובץ'))).toBe(false);
+    expect(await store.add(chat('c2', 5))).toBe(true);
+    expect(await store.get('c1')).toEqual(mine);
+    expect((await store.list()).map((c) => c.id)).toEqual(['c1', 'c2']);
+
+    // Two adds of the same chat asked for together: one of them wins, the other is told so.
+    const both = await Promise.all([store.add(chat('c3', 1, 'ראשון')), store.add(chat('c3', 1, 'שני'))]);
+    expect(both).toEqual([true, false]);
+    expect((await store.get('c3'))?.messages[0].text).toBe('ראשון');
+  });
+
   it('renames a chat without touching its messages, and says when the chat is gone', async () => {
     const store = await openChatStore(new IDBFactory());
     const saved = chat('c1', 100, 'למה השמיים כחולים?');
