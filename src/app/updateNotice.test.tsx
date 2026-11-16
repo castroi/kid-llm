@@ -4,8 +4,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ChatResult } from '../ai/providers';
 import type { ChatRequest } from '../ai/send';
 import { UPDATE_MESSAGE } from '../core/kidMessages';
+import type { ChatStore } from '../storage/chatStore';
 import type { Settings } from '../storage/settings';
 import { fakeParent } from '../test/fakeParent';
+import { memoryStore } from '../test/memoryStore';
 import { App } from './App';
 import type { Services } from './useChat';
 import { UPDATE_CHECK_INTERVAL_MS, type UpdateServices } from './useUpdateCheck';
@@ -22,10 +24,10 @@ const SETTINGS: Settings = {
   dailyLimit: null,
 };
 
-function services(sendChat: (request: ChatRequest) => Promise<ChatResult>): Services {
+function services(sendChat: (request: ChatRequest) => Promise<ChatResult>, store: ChatStore | null = memoryStore()): Services {
   let id = 0;
   return {
-    store: null,
+    store,
     loadSettings: () => SETTINGS,
     loadApiKey: () => 'sk-test',
     sendChat,
@@ -45,7 +47,7 @@ interface Site {
   online: boolean;
 }
 
-function open(site: Partial<Site> = {}, options: { current?: string; sendChat?: (request: ChatRequest) => Promise<ChatResult> } = {}) {
+function open(site: Partial<Site> = {}, options: { current?: string; sendChat?: (request: ChatRequest) => Promise<ChatResult>; store?: ChatStore | null } = {}) {
   const state: Site = { deployed: THIS_BUILD, online: true, ...site };
   const deployed = vi.fn(async () => state.deployed);
   const reload = vi.fn();
@@ -56,7 +58,7 @@ function open(site: Partial<Site> = {}, options: { current?: string; sendChat?: 
       request.onDelta('היי');
       return { text: 'היי', finishReason: 'stop' };
     });
-  const { unmount } = render(<App services={services(send)} parent={fakeParent().parent} updates={updates} />);
+  const { unmount } = render(<App services={services(send, options.store === undefined ? memoryStore() : options.store)} parent={fakeParent().parent} updates={updates} />);
   return { state, deployed, reload, unmount };
 }
 
@@ -198,6 +200,52 @@ describe('the update notice', () => {
 
     act(() => finish());
     expect(await screen.findByText(UPDATE_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('is not shown while she has started a message, and is once the box is empty again', async () => {
+    const { state } = open({ deployed: THIS_BUILD });
+    await userEvent.type(screen.getByLabelText('הודעה'), 'שלום');
+
+    state.deployed = NEWER;
+    show('visible');
+    await settle();
+    expect(notice()).toBeNull();
+
+    await userEvent.clear(screen.getByLabelText('הודעה'));
+    expect(await screen.findByText(UPDATE_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('counts spaces alone as no message', async () => {
+    open({ deployed: NEWER });
+    await userEvent.type(screen.getByLabelText('הודעה'), '   ');
+    expect(await screen.findByText(UPDATE_MESSAGE)).toBeInTheDocument();
+  });
+
+  it('is not shown while the phone cannot save the chat, since loading the new version would lose it', async () => {
+    const { deployed } = open({ deployed: NEWER }, { store: null });
+    await waitFor(() => expect(deployed).toHaveBeenCalled());
+    await settle();
+    expect(notice()).toBeNull();
+  });
+
+  it('goes away when the site serves this same version again (a deployment rolled back)', async () => {
+    const { state } = open({ deployed: NEWER });
+    expect(await screen.findByText(UPDATE_MESSAGE)).toBeInTheDocument();
+
+    state.deployed = THIS_BUILD;
+    show('visible');
+    await waitFor(() => expect(notice()).toBeNull());
+  });
+
+  it('stays when the site cannot tell for a moment (offline, an error)', async () => {
+    const { state, deployed } = open({ deployed: NEWER });
+    expect(await screen.findByText(UPDATE_MESSAGE)).toBeInTheDocument();
+
+    state.deployed = null;
+    show('visible');
+    await waitFor(() => expect(deployed).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(screen.getByText(UPDATE_MESSAGE)).toBeInTheDocument();
   });
 
   it('stops asking once the screen is gone', async () => {

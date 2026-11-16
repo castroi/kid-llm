@@ -20,11 +20,11 @@ export interface UpdateServices {
 export const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 
 export interface UpdateCheck {
-  /** A newer version is out and the notice wasn't put off for it. */
+  /** The site serves another version than this one, and the notice wasn't put off for it. */
   ready: boolean;
   /** Loads the newer version. */
   update: () => void;
-  /** "אחר כך": the notice goes away until a version newer than this one is out. */
+  /** "אחר כך": the notice goes away until the site serves yet another version. */
   later: () => void;
 }
 
@@ -40,8 +40,11 @@ export function useUpdateCheck(updates: UpdateServices | undefined): UpdateCheck
     void updates
       .deployed()
       .then((deployed) => {
-        // A commit that differs from this build's is what the site serves now, newer or rolled back.
-        if (deployed !== null && deployed !== updates.current) setNewer(deployed);
+        // The site can't tell right now: what was known stays as it was.
+        if (deployed === null) return;
+        // Any commit other than this build's is what the site serves now, newer or rolled back;
+        // this build's own again (a deployment rolled back) means there is nothing to load.
+        setNewer(deployed === updates.current ? null : deployed);
       })
       .finally(() => {
         asking.current = false;

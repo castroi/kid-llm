@@ -28,6 +28,8 @@ function readSetup(services: Services) {
 export function App({ services, parent, updates }: { services: Services; parent: ParentServices; updates?: UpdateServices }) {
   const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat } = useChat(services);
   const newVersion = useUpdateCheck(updates);
+  // She has started a message: loading the new version now would throw it away.
+  const [drafting, setDrafting] = useState(false);
   const [inHistory, setInHistory] = useState(false);
   const [pickingMode, setPickingMode] = useState(false);
   const [inParentArea, setInParentArea] = useState(false);
@@ -95,8 +97,9 @@ export function App({ services, parent, updates }: { services: Services; parent:
           {PARENT_USE_MESSAGE}
         </p>
       )}
-      {/* Never while an answer is being written: loading the new version would cut it. */}
-      {newVersion.ready && !writing && (
+      {/* Loading the new version reloads the app, so never while that would lose something: an
+          answer being written, a message she started, or a chat the phone couldn't save. */}
+      {newVersion.ready && !writing && !drafting && !notSaved && (
         <div className="update-notice" role="status">
           <p>{UPDATE_MESSAGE}</p>
           <div className="update-actions">
@@ -161,6 +164,7 @@ export function App({ services, parent, updates }: { services: Services; parent:
         onSend={send}
         onStop={stop}
         onPickMode={() => setPickingMode(true)}
+        onDraftChange={setDrafting}
       />
       </div>
       {pickingMode && <ModeSheet mode={mode} models={setup.models} onPick={setMode} onClose={() => setPickingMode(false)} />}
