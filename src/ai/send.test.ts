@@ -254,10 +254,10 @@ describe('sendChat', () => {
     expect(JSON.parse(plain.calls[0].init.body as string).messages[0].content).not.toContain(SEARCH_BASELINE);
   });
 
-  it('asks the provider to search the web only in search mode', async () => {
+  it('asks the provider to search the web and read the addresses she wrote only in search mode', async () => {
     const search = fetchStream([piece('מצאתי'), DONE]);
     await sendChat(request(search.fetch, { webSearch: true }));
-    expect(JSON.parse(search.calls[0].init.body as string).venice_parameters).toEqual({ include_venice_system_prompt: false, enable_web_search: 'on' });
+    expect(JSON.parse(search.calls[0].init.body as string).venice_parameters).toEqual({ include_venice_system_prompt: false, enable_web_search: 'on', enable_web_scraping: true });
 
     const plain = fetchStream([piece('היי'), DONE]);
     await sendChat(request(plain.fetch));
