@@ -35,10 +35,18 @@ describe('what the parent is told', () => {
   });
 
   it('says what an import did: what was added, what was left alone, and where it stopped', () => {
-    expect(importText({ added: 3, kept: 0, unreadable: 0, ended: 'whole' })).toBe('נוספו 3 שיחות.');
-    expect(importText({ added: 1, kept: 1, unreadable: 1, ended: 'whole' })).toBe('נוספה שיחה אחת. שיחה אחת כבר הייתה באייפון ולא שונתה. רשומה אחת בקובץ היא לא שיחה, ודילגנו עליה.');
-    expect(importText({ added: 0, kept: 4, unreadable: 2, ended: 'whole' })).toBe('לא נוספו שיחות. 4 שיחות כבר היו באייפון ולא שונו. 2 רשומות בקובץ הן לא שיחות, ודילגנו עליהן.');
-    expect(importText({ added: 2, kept: 0, unreadable: 0, ended: 'cut' })).toContain('הקובץ קטוע או פגום');
-    expect(importText({ added: 2, kept: 0, unreadable: 0, ended: 'not-saved' })).toContain('האחסון מלא');
+    const none = { addedParent: 0, kept: 0, unreadable: 0, ended: 'whole' as const };
+    expect(importText({ ...none, added: 3 })).toBe('נוספו 3 שיחות, כולן שלה.');
+    expect(importText({ ...none, added: 1, kept: 1, unreadable: 1 })).toBe('נוספה שיחה אחת, שלה. שיחה אחת כבר הייתה באייפון ולא שונתה. רשומה אחת בקובץ היא לא שיחה, ודילגנו עליה.');
+    expect(importText({ ...none, added: 0, kept: 4, unreadable: 2 })).toBe('לא נוספו שיחות. 4 שיחות כבר היו באייפון ולא שונו. 2 רשומות בקובץ הן לא שיחות, ודילגנו עליהן.');
+    expect(importText({ ...none, added: 2, ended: 'cut' })).toBe('נוספו 2 שיחות, כולן שלה. הקובץ קטוע או פגום, ולכן השיחות שבסופו לא יובאו. השיחות שלפני כן נוספו.');
+    expect(importText({ ...none, added: 2, ended: 'not-saved' })).toContain('האחסון מלא');
+  });
+
+  it("tells her chats from a parent's own in what was added, so a changed mark is noticed", () => {
+    const none = { kept: 0, unreadable: 0, ended: 'whole' as const };
+    expect(importText({ ...none, added: 1, addedParent: 1 })).toBe('נוספה שיחה אחת, של מצב הורים.');
+    expect(importText({ ...none, added: 4, addedParent: 4 })).toBe('נוספו 4 שיחות, כולן של מצב הורים.');
+    expect(importText({ ...none, added: 5, addedParent: 2 })).toBe('נוספו 5 שיחות: 3 שלה ו-2 של מצב הורים.');
   });
 });

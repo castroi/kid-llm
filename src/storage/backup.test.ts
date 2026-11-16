@@ -36,7 +36,7 @@ describe('exporting the chats', () => {
     expect(backup.file.name).toBe('kid-llm-backup-2026-11-16.kidllm');
 
     const phone = memoryStore();
-    expect(await importChats(phone, backup.file)).toEqual({ added: 3, kept: 0, unreadable: 0, ended: 'whole' });
+    expect(await importChats(phone, backup.file)).toEqual({ added: 3, addedParent: 1, kept: 0, unreadable: 0, ended: 'whole' });
     expect(phone.chats.get('c1')).toEqual(chats[0]);
     expect(phone.chats.get('c3')).toEqual(chats[2]);
     expect(new Uint8Array(phone.chats.get('c2')!.messages[1].image!.bytes)).toEqual(WEBP);
@@ -76,7 +76,7 @@ describe('importing a backup', () => {
     const mine = { ...chat('c1', 50, 'מה שיש באייפון'), title: 'נשאר' };
     const phone = memoryStore([mine, chat('only-here', 60)]);
     const result = await importChats(phone, fileOf(chat('c1', 999, 'מה שיש בקובץ'), chat('c2', 5)));
-    expect(result).toEqual({ added: 1, kept: 1, unreadable: 0, ended: 'whole' });
+    expect(result).toEqual({ added: 1, addedParent: 0, kept: 1, unreadable: 0, ended: 'whole' });
     expect(phone.chats.get('c1')).toEqual(mine);
     expect([...phone.chats.keys()].sort()).toEqual(['c1', 'c2', 'only-here']);
   });
@@ -90,21 +90,21 @@ describe('importing a backup', () => {
   it('says so when the file is cut short, and keeps what came before the cut', async () => {
     const whole = fileOf(chat('c1', 1), chat('c2', 2));
     const phone = memoryStore();
-    expect(await importChats(phone, whole.slice(0, whole.size - 5))).toEqual({ added: 1, kept: 0, unreadable: 0, ended: 'cut' });
+    expect(await importChats(phone, whole.slice(0, whole.size - 5))).toEqual({ added: 1, addedParent: 0, kept: 0, unreadable: 0, ended: 'cut' });
     expect([...phone.chats.keys()]).toEqual(['c1']);
   });
 
   it('counts records that are not chats', async () => {
     const junk = new Uint8Array([0, 0, 0, 4, 110, 117, 108, 108]); // the text "null"
     const result = await importChats(memoryStore(), new Blob([backupHead(), junk, ...encodeChat(chat('c1', 1))]));
-    expect(result).toEqual({ added: 1, kept: 0, unreadable: 1, ended: 'whole' });
+    expect(result).toEqual({ added: 1, addedParent: 0, kept: 0, unreadable: 1, ended: 'whole' });
   });
 
   it('stops when the phone refuses to save, and says how far it got', async () => {
     const phone = memoryStore();
     const add = phone.add;
     phone.add = (incoming) => (incoming.id === 'c2' ? Promise.reject(new DOMException('full', 'QuotaExceededError')) : add(incoming));
-    expect(await importChats(phone, fileOf(chat('c1', 1), chat('c2', 2), chat('c3', 3)))).toEqual({ added: 1, kept: 0, unreadable: 0, ended: 'not-saved' });
+    expect(await importChats(phone, fileOf(chat('c1', 1), chat('c2', 2), chat('c3', 3)))).toEqual({ added: 1, addedParent: 0, kept: 0, unreadable: 0, ended: 'not-saved' });
     expect([...phone.chats.keys()]).toEqual(['c1']);
   });
 });

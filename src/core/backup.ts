@@ -10,8 +10,9 @@ import { sanitizeChat, type Chat } from './chat';
  *     the chat as JSON (UTF-8); where a picture or a file was, `bytes` holds its length
  *     the bytes of those pictures and files, in the order the JSON names them
  *
- * Pictures are written as they are, not as text, and the file is read one chat at a time:
- * the phone never holds every picture in memory at once.
+ * Pictures are written as they are, not as text, and the chats are read from the phone and
+ * from a file one chat at a time. The file being made is still held whole in memory until it
+ * is handed over.
  *
  * Only chats are ever in it. The API key, the parent's code and the settings are kept
  * elsewhere (src/storage/settings.ts, src/storage/pin.ts) and nothing here reads them; a
@@ -82,6 +83,8 @@ export class BackupError extends Error {
 export interface ImportResult {
   /** Chats that were not on the phone and are now. */
   added: number;
+  /** Of those, how many are marked as a parent's own. Told apart, so a parent can notice a file that was changed. */
+  addedParent: number;
   /** Chats that were already on the phone; they were left as they are. */
   kept: number;
   /** Records in the file that are not chats. */

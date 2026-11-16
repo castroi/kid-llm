@@ -57,7 +57,7 @@ export function fakeParent(initial: Partial<FakePhone> = {}, check: () => Promis
     handed: [],
     handOver: 'shared',
     imported: [],
-    importGives: { added: 2, kept: 0, unreadable: 0, ended: 'whole' },
+    importGives: { added: 2, addedParent: 0, kept: 0, unreadable: 0, ended: 'whole' },
     refuses: false,
     version: appVersion('0123456789abcdef0123456789abcdef01234567', '2026-11-12T14:05:00+02:00'),
     ...initial,

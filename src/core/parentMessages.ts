@@ -39,12 +39,22 @@ export function sizeText(bytes: number): string {
   return `${(kb / 1024).toFixed(1)} MB`;
 }
 
+/** How many chats were added, hers and a parent's own told apart: a mark changed in the file shows here. */
+function addedLine(added: number, parent: number): string {
+  const hers = added - parent;
+  if (added === 0) return 'לא נוספו שיחות.';
+  if (added === 1) return parent === 1 ? 'נוספה שיחה אחת, של מצב הורים.' : 'נוספה שיחה אחת, שלה.';
+  if (parent === 0) return `נוספו ${added} שיחות, כולן שלה.`;
+  if (hers === 0) return `נוספו ${added} שיחות, כולן של מצב הורים.`;
+  return `נוספו ${added} שיחות: ${hers} שלה ו-${parent} של מצב הורים.`;
+}
+
 /** What the parent is told after a backup file was imported. */
-export function importText({ added, kept, unreadable, ended }: ImportResult): string {
-  const lines = [added === 0 ? 'לא נוספו שיחות.' : added === 1 ? 'נוספה שיחה אחת.' : `נוספו ${added} שיחות.`];
+export function importText({ added, addedParent, kept, unreadable, ended }: ImportResult): string {
+  const lines = [addedLine(added, addedParent)];
   if (kept > 0) lines.push(kept === 1 ? 'שיחה אחת כבר הייתה באייפון ולא שונתה.' : `${kept} שיחות כבר היו באייפון ולא שונו.`);
   if (unreadable > 0) lines.push(unreadable === 1 ? 'רשומה אחת בקובץ היא לא שיחה, ודילגנו עליה.' : `${unreadable} רשומות בקובץ הן לא שיחות, ודילגנו עליהן.`);
-  if (ended === 'cut') lines.push('הקובץ קטוע או פגום: מה שבא בו אחרי הנקודה הזאת לא יובא.');
+  if (ended === 'cut') lines.push('הקובץ קטוע או פגום, ולכן השיחות שבסופו לא יובאו. השיחות שלפני כן נוספו.');
   if (ended === 'not-saved') lines.push('הייבוא נעצר כי האייפון לא שמר שיחה. ייתכן שהאחסון מלא.');
   return lines.join(' ');
 }

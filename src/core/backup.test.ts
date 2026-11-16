@@ -106,7 +106,7 @@ describe('a backup file', () => {
     expect(read!.messages[1]).not.toHaveProperty('model');
   });
 
-  it('drops a picture whose bytes are not a picture she could have, and keeps the message', async () => {
+  it('drops an attached file whose bytes are not the kind it claims, and keeps the message', async () => {
     const crafted = { id: 'c1', createdAt: 5, messages: [{ id: 'q', role: 'user', text: 'דף', at: 1, mode: 'chat', attachment: { kind: 'pdf', bytes: 4, name: 'a.pdf' } }] };
     const { records } = await readAll(fileOf(backupHead(), record(JSON.stringify(crafted)), new Uint8Array([77, 90, 1, 2]), ...encodeChat(chat('c2', 9))));
     expect(records[0]!.messages).toEqual([{ id: 'q', role: 'user', text: 'דף', at: 1, mode: 'chat' }]);

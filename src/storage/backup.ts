@@ -19,8 +19,8 @@ export function backupName(now: number): string {
 
 /**
  * Every chat on the phone (hers and a parent's own, with pictures and files) as one file.
- * Read and packed one chat at a time, so the phone never holds every picture in memory at
- * once. Rejects when the chats can't be read.
+ * Read from the phone one chat at a time; the file itself is held whole in memory until it is
+ * handed over. Rejects when the chats can't be read.
  */
 export async function exportChats(store: ChatStore, now: number): Promise<Backup> {
   const parts: BlobPart[] = [backupHead()];
@@ -43,11 +43,14 @@ export async function exportChats(store: ChatStore, now: number): Promise<Backup
  * Throws BackupError when the file is not a backup of this app.
  */
 export async function importChats(store: ChatStore, file: BackupSource): Promise<ImportResult> {
-  const result: ImportResult = { added: 0, kept: 0, unreadable: 0, ended: 'whole' };
+  const result: ImportResult = { added: 0, addedParent: 0, kept: 0, unreadable: 0, ended: 'whole' };
   try {
     const whole = await readBackup(file, async (chat) => {
       if (!chat) result.unreadable += 1;
-      else if (await store.add(chat)) result.added += 1;
+      else if (await store.add(chat)) {
+        result.added += 1;
+        if (chat.parentUse) result.addedParent += 1;
+      }
       else result.kept += 1;
     });
     if (!whole) result.ended = 'cut';

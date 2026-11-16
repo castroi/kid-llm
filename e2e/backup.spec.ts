@@ -98,7 +98,7 @@ test('a backup file brings the chats and their pictures back after "delete all",
   expect((await onPhone(page)).chats).toBe(0);
 
   await page.getByLabel('קובץ גיבוי לייבוא').setInputFiles(path);
-  await expect(page.getByText('נוספה שיחה אחת.')).toBeVisible();
+  await expect(page.getByText('נוספה שיחה אחת, שלה.')).toBeVisible();
   expect(await onPhone(page)).toEqual({ chats: 1, picture: PICTURE });
 
   // A second import of the same file changes nothing.

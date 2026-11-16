@@ -21,6 +21,7 @@ describe('backup in the parent area', () => {
     open();
     expect(screen.getByText(/מפתח ה-API, קוד ההורים וההגדרות אף פעם לא נמצאים בו\. הקובץ לא מוצפן/)).toBeInTheDocument();
     expect(screen.getByText(/שיחה שכבר נמצאת באייפון לא משתנה, ושום דבר לא נמחק/)).toBeInTheDocument();
+    expect(screen.getByText(/האפליקציה לא יכולה לדעת אם מישהו שינה את הקובץ/)).toBeInTheDocument();
   });
 
   it('makes the file first, and hands it over only on a second tap', async () => {
@@ -35,6 +36,8 @@ describe('backup in the parent area', () => {
     expect(await screen.findByText('הקובץ נמסר. כדאי לוודא שהוא נשמר במקום פרטי.')).toBeInTheDocument();
     expect(phone.handed).toHaveLength(1);
     expect(phone.handed[0].file.name).toBe('kid-llm-backup-2026-11-16.kidllm');
+    // Handed over: the file is let go.
+    expect(screen.queryByRole('button', { name: 'שמירת הקובץ' })).toBeNull();
   });
 
   it.each([
@@ -47,8 +50,8 @@ describe('backup in the parent area', () => {
     await ready('הקובץ מוכן: 2 שיחות, 2 KB.');
     await save();
     expect(await screen.findByText(text)).toBeInTheDocument();
-    // The file is still there to try again.
-    expect(screen.getByRole('button', { name: 'שמירת הקובץ' })).toBeInTheDocument();
+    // Not handed over: the file is still there to try again.
+    if (handOver !== 'downloaded') expect(screen.getByRole('button', { name: 'שמירת הקובץ' })).toBeInTheDocument();
   });
 
   it('with no chats there is nothing to hand over', async () => {
@@ -66,10 +69,10 @@ describe('backup in the parent area', () => {
   });
 
   it('imports the picked file and says what was added and what was left alone', async () => {
-    const phone = open({ importGives: { added: 3, kept: 1, unreadable: 0, ended: 'whole' } });
+    const phone = open({ importGives: { added: 3, addedParent: 1, kept: 1, unreadable: 0, ended: 'whole' } });
     const file = new File(['kid-llm backup 1\n'], 'kid-llm-backup-2026-11-16.kidllm');
     await pick(file);
-    expect(await screen.findByText('נוספו 3 שיחות. שיחה אחת כבר הייתה באייפון ולא שונתה.')).toBeInTheDocument();
+    expect(await screen.findByText('נוספו 3 שיחות: 2 שלה ו-1 של מצב הורים. שיחה אחת כבר הייתה באייפון ולא שונתה.')).toBeInTheDocument();
     expect(phone.imported).toEqual([file]);
     // The same file can be picked again.
     await pick(file);

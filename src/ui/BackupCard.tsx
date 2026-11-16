@@ -42,6 +42,8 @@ export function BackupCard({ parent }: { parent: ParentServices }) {
   const hand = async (made: Backup) => {
     const how = await parent.saveBackup(made).catch(() => 'failed' as const);
     setStatus(HANDED[how]);
+    // Handed over: the file is let go, so it doesn't stay in memory while the area is open.
+    if (how === 'shared' || how === 'downloaded') setBackup(null);
   };
 
   const pick = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -63,7 +65,7 @@ export function BackupCard({ parent }: { parent: ParentServices }) {
     <section className="card">
       <h2 className="card-title">גיבוי השיחות</h2>
       <p className="hint">
-        הגיבוי הוא קובץ אחד עם כל השיחות שבאייפון, שלה ושל מצב הורים, כולל התמונות והקבצים שבהן. מפתח ה-API, קוד ההורים וההגדרות אף פעם לא נמצאים בו. הקובץ לא מוצפן: מי שמקבל אותו יכול לקרוא את השיחות, ולכן כדאי לשמור אותו במקום פרטי.
+        הגיבוי הוא קובץ אחד עם כל השיחות שבאייפון, שלה ושל מצב הורים, כולל התמונות, הקבצים ושמות הקבצים שבהן. מפתח ה-API, קוד ההורים וההגדרות אף פעם לא נמצאים בו. הקובץ לא מוצפן: מי שמקבל אותו יכול לקרוא את השיחות, ולכן כדאי לשמור אותו במקום פרטי.
       </p>
       <button type="button" className="button" disabled={busy} onClick={() => void make()}>
         הכנת קובץ גיבוי
@@ -78,7 +80,7 @@ export function BackupCard({ parent }: { parent: ParentServices }) {
           </button>
         </>
       )}
-      <p className="hint">ייבוא מוסיף לאייפון את השיחות שבקובץ. שיחה שכבר נמצאת באייפון לא משתנה, ושום דבר לא נמחק. כדאי לייבא רק קובץ שהאפליקציה הזאת הכינה: שיחות ותמונות מקובץ אחר יופיעו ברשימת השיחות שלה כמו שהן.</p>
+      <p className="hint">ייבוא מוסיף לאייפון את השיחות שבקובץ. שיחה שכבר נמצאת באייפון לא משתנה, ושום דבר לא נמחק. האפליקציה לא יכולה לדעת אם מישהו שינה את הקובץ: מי שיכול לשנות אותו יכול להכניס לרשימת השיחות שלה כל טקסט וכל תמונה, בלי הנחיות הבטיחות ובלי בדיקת התמונות של הספק. לכן כדאי לייבא רק קובץ שהאפליקציה הזאת הכינה ושנשמר במקום שרק הורה יכול לשנות.</p>
       <button type="button" className="button" disabled={busy} onClick={() => picker.current?.click()}>
         ייבוא מקובץ גיבוי
       </button>
