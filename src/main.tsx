@@ -6,6 +6,7 @@ import type { ParentServices } from './app/parentServices';
 import type { Services } from './app/useChat';
 import { prepareAttachment, type PickedFile } from './core/attachment';
 import { APP_VERSION } from './core/version';
+import { exportChats, handOver, importChats } from './storage/backup';
 import { openChatStore, requestPersistence, type ChatStore } from './storage/chatStore';
 import { checkPin, hasPin, lockedFor, setPin } from './storage/pin';
 import { forgetSetup, hasSetup, loadApiKey, loadSettings, saveApiKey, saveSettings } from './storage/settings';
@@ -105,6 +106,15 @@ function browserParentServices(store: ChatStore | null): ParentServices {
     resetUsage: () => resetUsage(Date.now()),
     deleteAllChats: async () => {
       await store?.clear();
+    },
+    makeBackup: async () => {
+      if (!store) throw new Error('no storage');
+      return exportChats(store, Date.now());
+    },
+    saveBackup: (backup) => handOver(backup),
+    importBackup: async (file) => {
+      if (!store) throw new Error('no storage');
+      return importChats(store, file);
     },
     version: APP_VERSION,
   };

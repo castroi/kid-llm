@@ -64,6 +64,11 @@ button:disabled {
   white-space: nowrap;
 }
 
+/* A file picker that opens from a button and is never seen itself; like every input, not under 16px. */
+input.visually-hidden {
+  font-size: 16px;
+}
+
 /* The whole screen: dvh follows Safari's bars; the insets keep clear of the notch and the home indicator. */
 .screen {
   height: 100dvh;

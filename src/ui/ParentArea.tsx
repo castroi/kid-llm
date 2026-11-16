@@ -8,6 +8,7 @@ import { isReady, MODES } from '../core/modes';
 import { parentMessage, waitText } from '../core/parentMessages';
 import type { AppVersion } from '../core/version';
 import { PIN_PATTERN, type PinResult } from '../storage/pin';
+import { BackupCard } from './BackupCard';
 import { ModelField } from './ModelField';
 import { MAX_DAILY_LIMIT, MAX_MODEL_CHARS, MAX_NAME_CHARS, MAX_SYSTEM_PROMPT_CHARS, type Settings } from '../storage/settings';
 
@@ -613,6 +614,8 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
           שמירה
         </button>
       </form>
+
+      <BackupCard parent={parent} />
 
       <section className="card">
         <h2 className="card-title">נתונים באייפון הזה</h2>

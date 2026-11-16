@@ -15,6 +15,11 @@ export interface ChatStore {
   /** Adds the chat, or replaces the one with the same id. */
   save(chat: Chat): Promise<void>;
   /**
+   * Adds the chat only if no chat with its id is on the phone, and says whether it was added.
+   * For importing a backup: a chat that is already here is never replaced.
+   */
+  add(chat: Chat): Promise<boolean>;
+  /**
    * Replaces the chat only if it is still on the phone, and says whether it was. For the
    * end of an answer: if a parent deleted the chats meanwhile, it must not come back.
    */
@@ -128,6 +133,18 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
       return sanitizeChat(await read<unknown>((store) => store.get(id))) ?? undefined;
     },
     save: (chat) => write((store) => store.put(chat)),
+    async add(chat) {
+      let free = false;
+      // The check and the write share one transaction, so a save of the same chat can't slip in between.
+      await write((store) => {
+        const existing = store.getKey(chat.id);
+        existing.onsuccess = () => {
+          free = existing.result === undefined;
+          if (free) store.put(chat);
+        };
+      });
+      return free;
+    },
     async update(chat) {
       let found = false;
       // The check and the write share one transaction, so a delete can't slip in between.

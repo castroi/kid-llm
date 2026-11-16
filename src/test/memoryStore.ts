@@ -16,6 +16,11 @@ export function memoryStore(initial: Chat[] = []): ChatStore & { chats: Map<stri
       chats.set(chat.id, chat);
       return Promise.resolve();
     },
+    add: (chat) => {
+      const free = !chats.has(chat.id);
+      if (free) chats.set(chat.id, chat);
+      return Promise.resolve(free);
+    },
     update: (chat) => {
       const there = chats.has(chat.id);
       if (there) chats.set(chat.id, chat);
