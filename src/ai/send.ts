@@ -8,8 +8,9 @@ import { ADAPTERS, AiError, type ChatMessage, type ChatResult, type FetchLike, t
  * a timeout, and checks that an answer came back. Adapted from kid-closet's src/ai/send.ts.
  *
  * The provider keeps nothing between calls: every call carries the whole conversation
- * (`messages`). The baseline instructions (src/ai/baseline.ts) go first, then the parent's;
- * the child baseline is left out only when a parent switched the app to their own use.
+ * (`messages`). The baseline instructions (src/ai/baseline.ts) go first, then what the parent
+ * wrote for her; the child baseline is left out only when a parent switched the app to their
+ * own use, and then what the parent wrote for a parent goes instead of what was written for her.
  * Today's date goes with every call, since a model has no clock.
  */
 
@@ -90,8 +91,10 @@ export interface ChatRequest {
   provider: AiProviderId;
   /** The model the parent chose for the mode she is in. */
   model: string;
-  /** What the parent wrote; may be empty. The baseline instructions are sent before it unless `kidUse` is false. */
+  /** What the parent wrote for her chats; may be empty. Sent after the baseline instructions, and only for a child: never when `kidUse` is false. */
   systemPrompt: string;
+  /** What the parent wrote for a parent's own use; may be empty or missing. Sent only when `kidUse` is false: never for a child. */
+  parentSystemPrompt?: string;
   /**
    * False only when a parent switched the app to their own use in the parent area: the
    * child baseline is then left out. Anything else, also when it is missing, means a child.
@@ -130,10 +133,14 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   // A search call never carries a file: what goes into a search also reaches a search engine.
   const messages: ChatMessage[] = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
   const withFile = messages.some((message) => message.file !== undefined);
+  // One switch picks the built-in lines and the written ones, so a child's call can't carry
+  // what was written for a parent, and a parent's can't carry what was written for her.
+  const kidUse = req.kidUse !== false;
+  const written = kidUse ? req.systemPrompt : (req.parentSystemPrompt ?? '');
   const work = (signal: AbortSignal, alive: () => void, progress: () => void) =>
     ADAPTERS[req.provider].streamChat({
       model: req.model,
-      systemPrompt: systemPromptFor(req.systemPrompt, req.webSearch === true, withFile, req.kidUse !== false, req.now ?? new Date()),
+      systemPrompt: systemPromptFor(written, req.webSearch === true, withFile, kidUse, req.now ?? new Date()),
       messages,
       apiKey,
       webSearch: req.webSearch === true,

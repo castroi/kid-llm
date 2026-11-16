@@ -465,15 +465,18 @@ describe("a parent's own use", () => {
     await screen.findByText('היי לך!');
     expect(requests[0]).not.toHaveProperty('kidUse');
     expect(requests[0].systemPrompt).toBe('Be kind.');
+    expect(requests[0]).not.toHaveProperty('parentSystemPrompt');
   });
 
   it('says so on the chat screen for as long as it is on, and sends the call without the child baseline', async () => {
-    const { requests } = open({ settings: { parentUse: true } });
+    const { requests } = open({ settings: { parentUse: true, parentSystemPrompt: 'Be brief.' } });
     expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
     await say('שלום');
     await screen.findByText('היי לך!');
     expect(requests[0].kidUse).toBe(false);
-    expect(requests[0].systemPrompt).toBe('Be kind.');
+    // What was written for a parent goes; what was written for her ('Be kind.') stays on the phone.
+    expect(requests[0].parentSystemPrompt).toBe('Be brief.');
+    expect(requests[0].systemPrompt).toBe('');
     // Still there with a conversation on the screen.
     expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
   });

@@ -626,8 +626,41 @@ describe('the app changing hands while she is away', () => {
   });
 
   it('still asks again when the app stayed in the same hands', async () => {
-    const fake = await cutWhileAway({ ...SETTINGS, parentUse: true }, { ...SETTINGS, parentUse: true, systemPrompt: 'Be brief.' });
+    const fake = await cutWhileAway({ ...SETTINGS, parentUse: true }, { ...SETTINGS, parentUse: true, parentSystemPrompt: 'Be brief.' });
     await waitFor(() => expect(fake.calls).toHaveLength(2));
-    expect(fake.calls[1].request).toMatchObject({ kidUse: false, systemPrompt: 'Be brief.' });
+    expect(fake.calls[1].request).toMatchObject({ kidUse: false, parentSystemPrompt: 'Be brief.', systemPrompt: '' });
+  });
+
+  it("asks her question again with what was written for her, also when both texts were changed while she was away", async () => {
+    const fake = await cutWhileAway({ ...SETTINGS, systemPrompt: 'KID-OLD', parentSystemPrompt: 'ADULT-OLD' }, { ...SETTINGS, systemPrompt: 'KID-NEW', parentSystemPrompt: 'ADULT-NEW' });
+    await waitFor(() => expect(fake.calls).toHaveLength(2));
+    expect(fake.calls[0].request.systemPrompt).toBe('KID-OLD');
+    expect(fake.calls[1].request.systemPrompt).toBe('KID-NEW');
+    for (const call of fake.calls) {
+      expect(call.request).not.toHaveProperty('kidUse');
+      expect(call.request).not.toHaveProperty('parentSystemPrompt');
+      expect(JSON.stringify(call.request)).not.toContain('ADULT');
+    }
+  });
+
+  it("asks a parent's question again with what was written for a parent, never with what was written for her", async () => {
+    const fake = await cutWhileAway(
+      { ...SETTINGS, parentUse: true, systemPrompt: 'KID-OLD', parentSystemPrompt: 'ADULT-OLD' },
+      { ...SETTINGS, parentUse: true, systemPrompt: 'KID-NEW', parentSystemPrompt: 'ADULT-NEW' },
+    );
+    await waitFor(() => expect(fake.calls).toHaveLength(2));
+    expect(fake.calls[0].request).toMatchObject({ kidUse: false, systemPrompt: '', parentSystemPrompt: 'ADULT-OLD' });
+    expect(fake.calls[1].request).toMatchObject({ kidUse: false, systemPrompt: '', parentSystemPrompt: 'ADULT-NEW' });
+    for (const call of fake.calls) expect(JSON.stringify(call.request)).not.toContain('KID');
+  });
+
+  it("sends neither text of the other side when the app changed hands while a call was cut", async () => {
+    const both = { systemPrompt: 'KID-TEXT', parentSystemPrompt: 'ADULT-TEXT' };
+    const toParent = await cutWhileAway({ ...SETTINGS, ...both }, { ...SETTINGS, ...both, parentUse: true });
+    expect(toParent.calls).toHaveLength(1);
+    expect(JSON.stringify(toParent.calls[0].request)).not.toContain('ADULT');
+    const toChild = await cutWhileAway({ ...SETTINGS, ...both, parentUse: true }, { ...SETTINGS, ...both });
+    expect(toChild.calls).toHaveLength(1);
+    expect(JSON.stringify(toChild.calls[0].request)).not.toContain('KID');
   });
 });

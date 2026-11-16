@@ -1,5 +1,5 @@
 /**
- * Sent first, before the parent's own instructions, whenever the app is used by a child
+ * Sent first, before what the parent wrote for her, whenever the app is used by a child
  * (the parent area's switch, on unless a parent turned it off): her messages never reach
  * a model with no instructions at all (the provider's own system prompt is switched off,
  * and the parent's can be empty). The parent's instructions add to this; they don't replace it.
@@ -80,9 +80,10 @@ export function dateLineFor(now: Date): string {
 
 /**
  * The system message for a call. For a child (`kidUse`, the default): the baseline (with
- * the search lines in search mode, the file lines with a file), then what the parent wrote.
- * For a parent's own use: no child baseline, only the lines about web text and files when
- * they apply, then what the parent wrote. With `now` (every call the app makes), today's
+ * the search lines in search mode, the file lines with a file), then what the parent wrote
+ * for her. For a parent's own use: no child baseline, only the lines about web text and files
+ * when they apply, then what the parent wrote for a parent. `parentPrompt` is the one text
+ * that belongs to this call; `sendChat` picks it by the same `kidUse`. With `now` (every call the app makes), today's
  * date closes the built-in lines; without it, a parent's own use with nothing written is ''.
  */
 export function systemPromptFor(parentPrompt: string, webSearch = false, withFile = false, kidUse = true, now?: Date): string {
