@@ -66,16 +66,16 @@ export interface ChatController {
   /** Asks again for an answer to her last message, replacing the last answer. */
   retry: () => void;
   startNewChat: () => void;
-  /** Her saved chats, most recently used first; empty when nothing is kept on this phone. */
+  /** The saved chats, most recently used first: hers, and in a parent's own use the parent's too. Empty when nothing is kept on this phone. */
   listChats: () => Promise<ChatSummary[]>;
-  /** Puts a saved chat on the screen. False when it is no longer on the phone. */
+  /** Puts a saved chat on the screen. False when it is no longer on the phone, or is a parent's own and the app is in her use. */
   openChat: (id: string) => Promise<boolean>;
   /** Gives a saved chat another name. False when it wasn't saved (also while its answer is being written). */
   renameChat: (id: string, title: string) => Promise<boolean>;
 }
 
 export function useChat(services: Services): ChatController {
-  const [chat, setChat] = useState<Chat>(() => newChat(DEFAULT_MODE, services.now(), services.newId()));
+  const [chat, setChat] = useState<Chat>(() => newChat(DEFAULT_MODE, services.now(), services.newId(), services.loadSettings().parentUse === true));
   const [mode, setModeState] = useState<ModeId>(DEFAULT_MODE);
   const [writing, setWriting] = useState(false);
   const [notice, setNotice] = useState<Notice>(null);
@@ -99,14 +99,16 @@ export function useChat(services: Services): ChatController {
    * the end of an answer, written only if the chat is still there, so a chat the parent
    * deleted meanwhile ("delete all") doesn't come back.
    *
-   * `parentUse`: the call was made while a parent used the app themself. Nothing of it is
-   * written to the phone, so her list of chats never holds an answer that was written
-   * without the child instructions; the screen says that the chat isn't saved.
+   * `parentUse`: the call was made while a parent used the app themself. A chat is written
+   * only by the side it belongs to: a parent's own chat (marked `parentUse`) in a parent's own
+   * use, hers in her use. What a parent adds to one of her chats is not written, so her list
+   * of chats never holds an answer that was written without the child instructions; the
+   * screen says that the chat isn't saved.
    */
   const keep = useCallback(
     (toSave: Chat, created: boolean, parentUse: boolean) => {
       if (!services.store) return;
-      if (parentUse) return setUnsavedId(toSave.id);
+      if ((toSave.parentUse === true) !== parentUse) return setUnsavedId(toSave.id);
       const saving: Promise<boolean> = created ? services.store.save(toSave).then(() => true) : services.store.update(toSave);
       saving.then(
         // "Saved" only after a write that really happened; update() writes nothing when the chat is gone.
@@ -192,8 +194,9 @@ export function useChat(services: Services): ChatController {
       // The app is leaving the screen: iOS may close it for good, so what was written so far is
       // saved now, marked as cut off. The end of the answer, if it comes, is saved over it.
       const saveWritten = () => {
-        // A parent's own chat is never written to the phone (see `keep`), not even half of it.
-        if (text === '' || !services.store || settings.parentUse === true) return;
+        // Written only by the side the chat belongs to (see `keep`): not even half of what a
+        // parent adds to one of her chats reaches the phone.
+        if (text === '' || !services.store || (current.parentUse === true) !== (settings.parentUse === true)) return;
         void services.store.update(withUpdatedMessage(current, { ...reply, text, state: 'failed' })).catch(() => undefined);
       };
       onHide.current = saveWritten;
@@ -375,16 +378,24 @@ export function useChat(services: Services): ChatController {
 
   const startNewChat = useCallback(() => {
     leave();
-    show(newChat(mode, services.now(), services.newId()));
+    // A chat started in a parent's own use is a parent's chat from its first message to its last.
+    show(newChat(mode, services.now(), services.newId(), services.loadSettings().parentUse === true));
   }, [services, mode, show, leave]);
 
-  const listChats = useCallback(async (): Promise<ChatSummary[]> => (services.store ? services.store.list() : []), [services.store]);
+  // A parent sees every chat, hers and their own. She sees only hers: a chat written without
+  // the child instructions is in no list of hers.
+  const listChats = useCallback(async (): Promise<ChatSummary[]> => {
+    if (!services.store) return [];
+    const chats = await services.store.list();
+    return services.loadSettings().parentUse === true ? chats : chats.filter((summary) => summary.parentUse !== true);
+  }, [services]);
 
   const openChat = useCallback(
     async (id: string): Promise<boolean> => {
       if (id === shown.current.id) return true;
       const found = await services.store?.get(id).catch(() => undefined);
-      if (!found) return false;
+      // A parent's own chat opens only in a parent's own use; for her it is as if it weren't there.
+      if (!found || (found.parentUse === true && services.loadSettings().parentUse !== true)) return false;
       leave();
       show(found);
       // What is on the screen now is exactly what is on the phone, whatever was said of this chat before.
@@ -392,7 +403,7 @@ export function useChat(services: Services): ChatController {
       if (isReady(found.mode)) setModeState(found.mode);
       return true;
     },
-    [services.store, show, leave],
+    [services, show, leave],
   );
 
   const renameChat = useCallback(

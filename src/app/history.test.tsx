@@ -43,11 +43,12 @@ const hangs: Send = (request) =>
     request.signal?.addEventListener('abort', () => reject(new AiError('cancelled')));
   });
 
-function openApp(store: ChatStore | null, send: Send = answersNow) {
+/** `hands` says whose use the app is in, and can be changed under the app. */
+function openApp(store: ChatStore | null, send: Send = answersNow, hands: { parentUse: boolean } = { parentUse: false }) {
   let id = 0;
   const services: Services = {
     store,
-    loadSettings: () => ({ provider: 'venice', models: { chat: 'm', search: '', math: 'm', draw: '' }, systemPrompt: '', childName: '', dailyLimit: null }),
+    loadSettings: () => ({ provider: 'venice', models: { chat: 'm', search: '', math: 'm', draw: '' }, systemPrompt: '', childName: '', dailyLimit: null, ...(hands.parentUse ? { parentUse: true as const } : {}) }),
     loadApiKey: () => 'sk-test',
     sendChat: send,
     prepareAttachment: () => Promise.reject(new Error('no files in this test')),
@@ -72,6 +73,53 @@ async function say(text: string) {
 }
 
 const title = () => screen.getByRole('heading', { level: 1 }).textContent;
+
+describe("a parent's own chats in the list", () => {
+  const chats = () => [savedChat('hers', 'שאלה שלה', NOW - HOUR), { ...savedChat('grown', 'grown-up chat', NOW - 2 * HOUR), parentUse: true as const }];
+
+  it("does not show her a chat written in a parent's own use", async () => {
+    openApp(memoryStore(chats()));
+    const list = await openList();
+    await list.findByRole('button', { name: 'שאלה שלה' });
+    expect(list.queryByRole('button', { name: /^grown-up chat/ })).not.toBeInTheDocument();
+    expect(list.queryByText('הורים')).not.toBeInTheDocument();
+  });
+
+  it("shows a parent both kinds, with the parent's marked, and saves what is added to a parent's chat", async () => {
+    const store = memoryStore(chats());
+    openApp(store, answersNow, { parentUse: true });
+    const list = await openList();
+    expect(await list.findByRole('button', { name: 'שאלה שלה' })).toBeInTheDocument();
+    const grown = list.getByRole('button', { name: /^grown-up chat/ });
+    expect(within(grown).getByText('הורים')).toBeInTheDocument();
+    expect(within(list.getByRole('button', { name: 'שאלה שלה' })).queryByText('הורים')).not.toBeInTheDocument();
+
+    await userEvent.click(grown);
+    expect(await screen.findByText('תשובה על grown-up chat')).toBeInTheDocument();
+    await say('one more');
+    await waitFor(() => expect(store.chats.get('grown')?.messages.map((m) => m.text)).toEqual(['grown-up chat', 'תשובה על grown-up chat', 'one more', 'היי!']));
+    expect(store.chats.get('grown')?.parentUse).toBe(true);
+    expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
+    // A new chat started by a parent is the parent's too.
+    await userEvent.click(screen.getByRole('button', { name: 'שיחה חדשה' }));
+    await say('another');
+    await waitFor(() => expect(store.chats.size).toBe(3));
+    expect([...store.chats.values()].filter((chat) => chat.parentUse === true)).toHaveLength(2);
+  });
+
+  it("does not open a parent's chat once the app is back in her use, even from a list that still shows it", async () => {
+    const hands = { parentUse: true };
+    openApp(memoryStore(chats()), answersNow, hands);
+    const list = await openList();
+    const grown = await list.findByRole('button', { name: /^grown-up chat/ });
+    // The app changes hands under the open list.
+    hands.parentUse = false;
+    await userEvent.click(grown);
+    expect(await list.findByText('השיחה הזאת כבר לא באייפון.')).toBeInTheDocument();
+    await waitFor(() => expect(list.queryByRole('button', { name: /^grown-up chat/ })).not.toBeInTheDocument());
+    expect(screen.queryByText('תשובה על grown-up chat')).not.toBeInTheDocument();
+  });
+});
 
 describe('the list of chats', () => {
   it('shows her saved chats under day headings, most recently used first', async () => {

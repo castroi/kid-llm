@@ -381,9 +381,10 @@ describe('who uses the app', () => {
     expect(box().checked).toBe(false);
     expect(screen.getByText(/הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר/)).toBeInTheDocument();
     expect(screen.getByText(/חשוב לסמן אותה\s+ולשמור לפני שהאייפון חוזר לילדה/)).toBeInTheDocument();
-    // The parent is told what else goes, that these chats are not kept, and that it doesn't end by itself.
+    // The parent is told what else goes, where these chats are kept and shown, and that it doesn't end by itself.
     expect(screen.getByText(/ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה/)).toBeInTheDocument();
-    expect(screen.getByText(/שיחות במצב הזה לא נשמרות באייפון\s+ולא מופיעות ברשימת השיחות שלה/)).toBeInTheDocument();
+    expect(screen.getByText(/שיחות במצב הזה נשמרות באייפון, מסומנות "הורים" ומוצגות רק במצב הזה:\s+הן לא מופיעות ברשימת השיחות שלה/)).toBeInTheDocument();
+    expect(screen.getByText(/מה שנכתב כאן בתוך שיחה שלה לא נשמר\. "מחיקת כל השיחות" מוחקת גם אותן/)).toBeInTheDocument();
     expect(screen.getByText(/המצב הזה לא מסתיים מעצמו/)).toBeInTheDocument();
     expect(screen.getByText(/מגבלת ההודעות היומית חלה גם כאן/)).toBeInTheDocument();
     // Nothing changed on the phone yet.

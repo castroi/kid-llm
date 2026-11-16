@@ -28,6 +28,21 @@ describe('chat store', () => {
     expect(list[0]).not.toHaveProperty('messages');
   });
 
+  it("keeps the mark of a parent's own chat, in the chat and in the list", async () => {
+    const store = await openChatStore(new IDBFactory());
+    await store.save({ ...chat('p', 100), parentUse: true });
+    await store.save(chat('k', 200));
+    expect((await store.get('p'))?.parentUse).toBe(true);
+    expect(await store.get('k')).not.toHaveProperty('parentUse');
+    expect((await store.list()).map((c) => [c.id, c.parentUse])).toEqual([
+      ['k', undefined],
+      ['p', true],
+    ]);
+    // Renaming keeps it.
+    await store.rename('p', 'another name');
+    expect((await store.get('p'))?.parentUse).toBe(true);
+  });
+
   it('replaces a chat saved again under the same id', async () => {
     const store = await openChatStore(new IDBFactory());
     await store.save(chat('c1', 100));

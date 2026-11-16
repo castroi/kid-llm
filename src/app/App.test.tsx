@@ -478,7 +478,7 @@ describe("a parent's own use", () => {
     expect(screen.getByRole('note')).toHaveTextContent(PARENT_USE_MESSAGE);
   });
 
-  it("writes nothing of a parent's own chat to the phone, and says that the chat isn't saved", async () => {
+  it("saves a parent's own chat marked as the parent's, and does not call it unsaved", async () => {
     const store = fakeStore();
     const { requests } = open({ store, settings: { parentUse: true } });
     await say('שלום');
@@ -486,9 +486,11 @@ describe("a parent's own use", () => {
     await userEvent.click(screen.getByRole('button', { name: 'נסי שוב' }));
     await waitFor(() => expect(requests).toHaveLength(2));
     await screen.findByText('היי לך!');
-    expect(store.saved).toEqual([]);
-    expect(store.updated).toEqual([]);
-    expect(screen.getByText(NOT_SAVED_MESSAGE)).toBeInTheDocument();
+    expect(store.saved).toHaveLength(1);
+    await waitFor(() => expect(store.updated).toHaveLength(2));
+    // Every write carries the mark that keeps the chat out of her list.
+    expect([...store.saved, ...store.updated].every((chat) => chat.parentUse === true)).toBe(true);
+    expect(screen.queryByText(NOT_SAVED_MESSAGE)).not.toBeInTheDocument();
   });
 
   it("makes an address the model wrote a link, shown by its site's name, only in a parent's own use", async () => {
