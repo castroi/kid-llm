@@ -144,6 +144,35 @@ describe('settings', () => {
     expect(storage.entries.get(SETTINGS_KEY)).not.toContain('parentUse');
   });
 
+  it("keep what was written for a parent in its own field, apart from what was written for her", () => {
+    const storage = memory();
+    saveSettings({ ...SET_UP, parentSystemPrompt: 'Be brief.' }, storage);
+    expect(loadSettings(storage)).toEqual({ ...SET_UP, parentSystemPrompt: 'Be brief.' });
+    // Settings saved before there were two texts: her text stays hers, and a parent has none.
+    expect(sanitizeSettings({ systemPrompt: 'Be kind.' })).not.toHaveProperty('parentSystemPrompt');
+    expect(sanitizeSettings({ systemPrompt: 'Be kind.' }).systemPrompt).toBe('Be kind.');
+    expect(DEFAULT_SETTINGS).not.toHaveProperty('parentSystemPrompt');
+    // Neither field is read for the other.
+    expect(sanitizeSettings({ parentSystemPrompt: 'Be brief.' }).systemPrompt).toBe('');
+    expect(sanitizeSettings({ systemPrompt: {}, parentSystemPrompt: 'Be brief.' })).toMatchObject({ systemPrompt: '', parentSystemPrompt: 'Be brief.' });
+  });
+
+  it("save nothing for a parent's text that is empty or not text, and cut one that is too long", () => {
+    for (const junk of ['', '   ', '\n', 7, true, null, {}, [], ['Be brief.'], { text: 'Be brief.' }]) {
+      expect(sanitizeSettings({ systemPrompt: 'Be kind.', parentSystemPrompt: junk })).not.toHaveProperty('parentSystemPrompt');
+      expect(sanitizeSettings({ systemPrompt: 'Be kind.', parentSystemPrompt: junk }).systemPrompt).toBe('Be kind.');
+    }
+    const long = sanitizeSettings({ systemPrompt: 'k'.repeat(MAX_SYSTEM_PROMPT_CHARS + 50), parentSystemPrompt: 'a'.repeat(MAX_SYSTEM_PROMPT_CHARS + 50) });
+    expect(long.systemPrompt).toBe('k'.repeat(MAX_SYSTEM_PROMPT_CHARS));
+    expect(long.parentSystemPrompt).toBe('a'.repeat(MAX_SYSTEM_PROMPT_CHARS));
+    // Removing a parent's text removes the field from the phone; her text is untouched.
+    const storage = memory();
+    saveSettings({ ...SET_UP, parentSystemPrompt: 'Be brief.' }, storage);
+    saveSettings({ ...SET_UP, parentSystemPrompt: undefined }, storage);
+    expect(storage.entries.get(SETTINGS_KEY)).not.toContain('parentSystemPrompt');
+    expect(loadSettings(storage)).toEqual(SET_UP);
+  });
+
   it('accept a daily limit only as a whole number of at least 1, capped', () => {
     expect(sanitizeSettings({ dailyLimit: 20 }).dailyLimit).toBe(20);
     expect(sanitizeSettings({ dailyLimit: 0 }).dailyLimit).toBeNull();

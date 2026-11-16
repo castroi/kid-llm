@@ -9,7 +9,7 @@ import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage,
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
-import { fileModelFor, isE2ee, missingFor, modelFor, type Settings } from '../storage/settings';
+import { fileModelFor, instructionsFor, isE2ee, missingFor, modelFor, type Settings } from '../storage/settings';
 
 /** Everything the chat needs from outside, so tests can stand in for the phone and the provider. */
 export interface Services {
@@ -218,14 +218,14 @@ export function useChat(services: Services): ChatController {
           const result = await services.sendChat({
             provider: settings.provider,
             model,
-            systemPrompt: settings.systemPrompt,
+            // What the parent wrote for whoever holds the app now, and never the other text. In a
+            // parent's own use it comes with the mark that leaves the child baseline out.
+            ...instructionsFor(settings),
             messages: withFile ? talk : talk.map(({ role, content }) => ({ role, content })),
             apiKey,
             webSearch: forMode === 'search',
             // By the provider's tag saved with the choice; send.ts leaves it off for a search or a file.
             ...(isE2ee(model, settings) ? { e2ee: true } : {}),
-            // The child baseline is left out only when a parent switched the app to their own use.
-            ...(settings.parentUse === true ? { kidUse: false } : {}),
             signal: controller.signal,
             onDelta: (piece) => {
               // Another answer to the same message counts toward the day only once it really arrives.

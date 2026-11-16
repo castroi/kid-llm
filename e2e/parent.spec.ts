@@ -226,3 +226,44 @@ test('the parent area ends with the version of the app and a link to its commit;
   const pageWidth = await page.evaluate(() => document.documentElement.scrollWidth);
   expect(pageWidth).toBeLessThanOrEqual(viewport.width);
 });
+
+test("a parent writes one system prompt for her and one for a parent, and the phone keeps them apart", async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
+  await page.getByRole('button', { name: 'אזור הורים' }).tap();
+  await page.getByLabel('קוד חדש (4 עד 8 ספרות)').fill('2468');
+  await page.getByLabel('שוב, לאימות').fill('2468');
+  await page.getByRole('button', { name: 'שמירת הקוד' }).tap();
+
+  const picker = page.getByLabel('למי ההנחיות שבתיבה');
+  const textBox = page.getByLabel('הנחיות מערכת (System prompt)');
+  // One list and one text box: on a child's phone it starts on her text.
+  await expect(picker).toHaveValue('child');
+  await textBox.fill('KID-ONLY words');
+  await picker.selectOption('parent');
+  await expect(textBox).toHaveValue('');
+  await textBox.fill('ADULT-ONLY words');
+  await picker.selectOption('child');
+  await expect(textBox).toHaveValue('KID-ONLY words');
+
+  // Big enough not to make Safari zoom, and to tap.
+  expect(await picker.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
+  expect((await picker.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+
+  await page.getByRole('button', { name: 'שמירה', exact: true }).tap();
+  await expect(page.getByText('נשמר.', { exact: true })).toBeVisible();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('kid-llm.settings.v1') ?? '{}') as Record<string, unknown>);
+  expect(saved.systemPrompt).toBe('KID-ONLY words');
+  expect(saved.parentSystemPrompt).toBe('ADULT-ONLY words');
+  expect(saved).not.toHaveProperty('parentUse');
+
+  // Back in after closing: each text is where it was written.
+  await page.getByRole('button', { name: 'סיום' }).tap();
+  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
+  await page.getByRole('button', { name: 'אזור הורים' }).tap();
+  await page.getByLabel('קוד הורים', { exact: true }).fill('2468');
+  await page.getByRole('button', { name: 'כניסה' }).tap();
+  await expect(textBox).toHaveValue('KID-ONLY words');
+  await picker.selectOption('parent');
+  await expect(textBox).toHaveValue('ADULT-ONLY words');
+});

@@ -362,6 +362,121 @@ describe('the settings', () => {
   });
 });
 
+describe('the two system prompts', () => {
+  const KID = 'KID-ONLY words for her';
+  const ADULT = 'ADULT-ONLY words for a parent';
+  const both = { provider: 'venice' as const, models: { chat: 'm', search: '', math: '', draw: '' }, systemPrompt: KID, parentSystemPrompt: ADULT, childName: '', dailyLimit: null };
+  const picker = () => screen.getByLabelText('למי ההנחיות שבתיבה') as HTMLSelectElement;
+  const textBox = () => screen.getByLabelText('הנחיות מערכת (System prompt)') as HTMLTextAreaElement;
+  const childBox = () => screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }) as HTMLInputElement;
+  const save = () => userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+
+  it("offers her text and a parent's in one list, shows one of them in one text box, and says where each one goes", async () => {
+    await openSettings({ settings: both });
+    expect(Array.from(picker().options).map((option) => [option.value, option.textContent])).toEqual([
+      ['child', 'לילדה'],
+      ['parent', 'להורים (מצב הורים)'],
+    ]);
+    // On a child's phone the box starts on her text.
+    expect(picker().value).toBe('child');
+    expect(textBox().value).toBe(KID);
+    expect(screen.getAllByLabelText('הנחיות מערכת (System prompt)')).toHaveLength(1);
+    expect(screen.getByText(/ההנחיות לילדה: נשלחות לספק עם כל הודעה, אחרי הנחיות הבטיחות המובנות, רק כשהאפליקציה בשימוש של ילדה\. במצב הורים הן לא נשלחות/)).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(ADULT);
+
+    await userEvent.selectOptions(picker(), 'parent');
+    expect(textBox().value).toBe(ADULT);
+    expect(textBox().maxLength).toBe(4000);
+    expect(screen.getAllByLabelText('הנחיות מערכת (System prompt)')).toHaveLength(1);
+    expect(screen.getByText(/ההנחיות להורים: נשלחות לספק רק במצב הורים/)).toBeInTheDocument();
+    expect(screen.getByText(/הן אף פעם לא נשלחות עם הודעה שלה/)).toBeInTheDocument();
+    expect(screen.queryByText(/ההנחיות לילדה: נשלחות לספק/)).not.toBeInTheDocument();
+    expect(textBox().value).not.toContain('KID-ONLY');
+  });
+
+  it("starts on a parent's text on a phone that is in a parent's own use", async () => {
+    await openSettings({ settings: { ...both, parentUse: true } });
+    expect(picker().value).toBe('parent');
+    expect(textBox().value).toBe(ADULT);
+    await userEvent.selectOptions(picker(), 'child');
+    expect(textBox().value).toBe(KID);
+  });
+
+  it('changes only the text that is chosen, and saves both, each in its own field', async () => {
+    const { phone } = await openSettings({ settings: both });
+    await userEvent.clear(textBox());
+    await userEvent.type(textBox(), 'New words for her.');
+    await userEvent.selectOptions(picker(), 'parent');
+    // The other text is as it was saved.
+    expect(textBox().value).toBe(ADULT);
+    await userEvent.type(textBox(), ' And more.');
+    // Going back and forth loses nothing that was typed.
+    await userEvent.selectOptions(picker(), 'child');
+    expect(textBox().value).toBe('New words for her.');
+    await userEvent.selectOptions(picker(), 'parent');
+    expect(textBox().value).toBe(`${ADULT} And more.`);
+    // Nothing reached the phone before "save".
+    expect(phone.settings).toEqual(both);
+    await save();
+    expect(screen.getByText('נשמר.')).toBeInTheDocument();
+    expect(phone.settings.systemPrompt).toBe('New words for her.');
+    expect(phone.settings.parentSystemPrompt).toBe(`${ADULT} And more.`);
+  });
+
+  it("writes a parent's text on a phone that had only hers, and leaves hers as it was", async () => {
+    const { phone } = await openSettings({ settings: { ...both, parentSystemPrompt: undefined } });
+    await userEvent.selectOptions(picker(), 'parent');
+    expect(textBox().value).toBe('');
+    await userEvent.type(textBox(), 'Be brief.');
+    await save();
+    expect(phone.settings.systemPrompt).toBe(KID);
+    expect(phone.settings.parentSystemPrompt).toBe('Be brief.');
+  });
+
+  it("saves no field for a parent's text that was emptied, and leaves hers as it was", async () => {
+    const { phone } = await openSettings({ settings: both });
+    await userEvent.selectOptions(picker(), 'parent');
+    await userEvent.clear(textBox());
+    await save();
+    expect(phone.settings.parentSystemPrompt).toBeUndefined();
+    expect(JSON.stringify(phone.settings)).not.toContain('parentSystemPrompt');
+    expect(phone.settings.systemPrompt).toBe(KID);
+
+    // Emptying hers leaves a parent's as it was.
+    await userEvent.selectOptions(picker(), 'child');
+    await userEvent.clear(textBox());
+    await userEvent.selectOptions(picker(), 'parent');
+    await userEvent.type(textBox(), ADULT);
+    await save();
+    expect(phone.settings.systemPrompt).toBe('');
+    expect(phone.settings.parentSystemPrompt).toBe(ADULT);
+  });
+
+  it('moves no text from one field to the other when the app changes hands', async () => {
+    const { phone } = await openSettings({ settings: both });
+    await userEvent.click(childBox());
+    expect(childBox().checked).toBe(false);
+    // The text box stays on the text that was chosen; the switch does not choose for the parent.
+    expect(picker().value).toBe('child');
+    expect(textBox().value).toBe(KID);
+    expect(screen.getByText(/נשלחות רק ההנחיות שכתבת להורים \(למטה\) והתאריך של היום/)).toBeInTheDocument();
+    expect(screen.getByText(/ההנחיות שכתבת לילדה לא נשלחות במצב הזה/)).toBeInTheDocument();
+    await save();
+    expect(phone.settings).toMatchObject({ parentUse: true, systemPrompt: KID, parentSystemPrompt: ADULT });
+
+    await userEvent.click(childBox());
+    await save();
+    expect(phone.settings.parentUse).toBeUndefined();
+    expect(phone.settings).toMatchObject({ systemPrompt: KID, parentSystemPrompt: ADULT });
+  });
+
+  it('tells the parent of a child\'s phone that her text goes after the built-in lines, and a parent\'s does not go', async () => {
+    await openSettings({ settings: both });
+    expect(screen.getByText(/ואחריהן ההנחיות שכתבת לילדה\. בלי סימון אלה ואלה לא נשלחות/)).toBeInTheDocument();
+    expect(screen.getByText(/יש שתי הנחיות מערכת נפרדות, אחת לילדה ואחת להורים/)).toBeInTheDocument();
+  });
+});
+
 describe('who uses the app', () => {
   const box = () => screen.getByRole('checkbox', { name: 'האפליקציה בשימוש של ילדה' }) as HTMLInputElement;
   const save = () => userEvent.click(screen.getByRole('button', { name: 'שמירה' }));

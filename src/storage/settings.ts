@@ -20,8 +20,17 @@ export interface Settings {
    * read pictures. Absent = not set up: she gets no attach button and no file leaves the phone.
    */
   fileModel?: string;
-  /** The parent's own instructions, sent after the built-in ones. May describe her; a backup that includes it says so. */
+  /**
+   * What the parent wrote for her chats: sent after the built-in child instructions, and only
+   * while the app is used by a child. May describe her; a backup that includes it says so.
+   */
   systemPrompt: string;
+  /**
+   * What the parent wrote for a parent's own use: sent only then, and never with a message of
+   * hers. Absent = nothing written. The two texts are kept apart: neither stands in for the
+   * other when it is empty (`instructionsFor`).
+   */
+  parentSystemPrompt?: string;
   /** Her name, for the greeting only; never sent to the provider. Personal: a backup that includes it says so. */
   childName: string;
   /** The most messages she can send in a day; null = no limit. */
@@ -84,11 +93,14 @@ export function sanitizeSettings(raw: unknown): Settings {
   const uncensored = [...chosen].filter((model) => marked.includes(model));
   const encrypting = marks(value.e2ee);
   const e2ee = [...chosen].filter((model) => encrypting.includes(model));
+  // Read from its own field only: what was written for her is never taken for a parent's, or the other way round.
+  const parentSystemPrompt = text(value.parentSystemPrompt, MAX_SYSTEM_PROMPT_CHARS);
   return {
     provider: typeof value.provider === 'string' && Object.hasOwn(AI_PROVIDERS, value.provider) ? (value.provider as AiProviderId) : DEFAULT_SETTINGS.provider,
     models,
     ...(fileModel ? { fileModel } : {}),
     systemPrompt: text(value.systemPrompt, MAX_SYSTEM_PROMPT_CHARS),
+    ...(parentSystemPrompt.trim() !== '' ? { parentSystemPrompt } : {}),
     childName: text(value.childName, MAX_NAME_CHARS).trim(),
     dailyLimit: typeof limit === 'number' && Number.isInteger(limit) && limit >= 1 ? Math.min(limit, MAX_DAILY_LIMIT) : null,
     // Only the exact value a parent's untick saves; anything else is a child's phone.
@@ -169,6 +181,21 @@ export function modelFor(mode: ModeId, settings: Settings): string {
 /** The model her attached files go to, under the same rule as `modelFor`; empty = no attaching. */
 export function fileModelFor(settings: Settings): string {
   return allowed(settings.fileModel ?? '', settings);
+}
+
+/** The written instructions of a chat call, as `sendChat` takes them (src/ai/send.ts). */
+export type Instructions = { systemPrompt: string } | { kidUse: false; systemPrompt: ''; parentSystemPrompt: string };
+
+/**
+ * What the parent wrote, for whoever holds the app now. Every chat call takes its written
+ * instructions from here, so the two texts can't be mixed: for a child, only what was written
+ * for her; in a parent's own use (saved as exactly `true`), only what was written for a
+ * parent, together with the mark that leaves the child baseline out. An empty text is sent
+ * as empty: the other one never fills in for it.
+ */
+export function instructionsFor(settings: Settings): Instructions {
+  if (settings.parentUse !== true) return { systemPrompt: typeof settings.systemPrompt === 'string' ? settings.systemPrompt : '' };
+  return { kidUse: false, systemPrompt: '', parentSystemPrompt: typeof settings.parentSystemPrompt === 'string' ? settings.parentSystemPrompt : '' };
 }
 
 /** Why she can't chat in a mode yet, for the "ask a parent" screen; null when it is ready. */

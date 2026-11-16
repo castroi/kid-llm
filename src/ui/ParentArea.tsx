@@ -217,6 +217,8 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
   const [dataStatus, setDataStatus] = useState('');
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [changingCode, setChangingCode] = useState(false);
+  // Whose written instructions the one text box shows: at first, those of whoever the app is set for.
+  const [promptFor, setPromptFor] = useState<'child' | 'parent'>(() => (draft.parentUse === true ? 'parent' : 'child'));
   // With a saved key the list is asked for as the settings open; without one there is nothing to ask with.
   const [list, setList] = useState<ModelList>(() => (parent.hasApiKey(draft.provider) ? { state: 'loading' } : { state: 'idle' }));
   // Only the newest request's answer is shown.
@@ -314,7 +316,14 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
     const chosen = [...Object.values(draft.models), draft.fileModel ?? ''].map((model) => model.trim());
     const marks = [...new Set(chosen.filter(uncensored))];
     const encrypted = [...new Set(chosen.filter(e2ee))];
-    const savedSettings = parent.saveSettings({ ...draft, dailyLimit: limit, uncensored: marks.length > 0 ? marks : undefined, e2ee: encrypted.length > 0 ? encrypted : undefined });
+    const savedSettings = parent.saveSettings({
+      ...draft,
+      // Nothing written for a parent is saved as no field at all.
+      parentSystemPrompt: (draft.parentSystemPrompt ?? '').trim() !== '' ? draft.parentSystemPrompt : undefined,
+      dailyLimit: limit,
+      uncensored: marks.length > 0 ? marks : undefined,
+      e2ee: encrypted.length > 0 ? encrypted : undefined,
+    });
     const savedKey = keyText.trim() ? parent.saveApiKey(provider, keyText) : true;
     if (savedKey) setKeyText('');
     setKeySaved(parent.hasApiKey(provider));
@@ -494,12 +503,12 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             </label>
             {draft.parentUse === true ? (
               <p className="hint warning">
-                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת כאן למטה והתאריך של היום, ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה. שיחות במצב הזה נשמרות באייפון, מסומנות "הורים" ומוצגות רק במצב הזה:
+                לא מסומן: הנחיות הבטיחות לילדים לא נשלחות, והמודל עונה כמו למבוגר. נשלחות רק ההנחיות שכתבת להורים (למטה) והתאריך של היום, ובחיפוש או עם קובץ מצורף גם השורות הקבועות שמופיעות ברשימה למטה. ההנחיות שכתבת לילדה לא נשלחות במצב הזה. שיחות במצב הזה נשמרות באייפון, מסומנות "הורים" ומוצגות רק במצב הזה:
                 הן לא מופיעות ברשימת השיחות שלה. מה שנכתב כאן בתוך שיחה שלה לא נשמר. "מחיקת כל השיחות" מוחקת גם אותן. במעבר בין המצבים נפתחת שיחה חדשה. ציור נשאר במצב בטוח לילדים, ומגבלת ההודעות היומית חלה גם כאן. המצב הזה לא מסתיים מעצמו: מסך הצ'אט מציג "מצב הורים" עד שהתיבה מסומנת שוב. חשוב לסמן אותה
                 ולשמור לפני שהאייפון חוזר לילדה.
               </p>
             ) : (
-              <p className="hint">מסומן: עם כל הודעה נשלחות לספק הנחיות הבטיחות המובנות לילדים, ואחריהן ההנחיות שכתבת. בלי סימון הן לא נשלחות, למשל כשהורה משתמש באפליקציה בעצמו.</p>
+              <p className="hint">מסומן: עם כל הודעה נשלחות לספק הנחיות הבטיחות המובנות לילדים, ואחריהן ההנחיות שכתבת לילדה. בלי סימון אלה ואלה לא נשלחות, למשל כשהורה משתמש באפליקציה בעצמו.</p>
             )}
             <details className="builtin">
               <summary>הנחיות הבטיחות המובנות, כפי שהן נשלחות</summary>
@@ -534,17 +543,43 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             </details>
           </div>
           <div className="field">
+            <label htmlFor="system-prompt-for">למי ההנחיות שבתיבה</label>
+            <select id="system-prompt-for" className="input" value={promptFor} onChange={(event) => setPromptFor(event.target.value === 'parent' ? 'parent' : 'child')}>
+              <option value="child">לילדה</option>
+              <option value="parent">להורים (מצב הורים)</option>
+            </select>
+            <p className="hint">יש שתי הנחיות מערכת נפרדות, אחת לילדה ואחת להורים. התיבה למטה מציגה את זו שנבחרה כאן, ושתיהן נשמרות ב"שמירה".</p>
+          </div>
+          <div className="field">
             <label htmlFor="system-prompt">הנחיות מערכת (System prompt)</label>
-            <textarea
-              id="system-prompt"
-              className="input"
-              rows={5}
-              dir="auto"
-              maxLength={MAX_SYSTEM_PROMPT_CHARS}
-              value={draft.systemPrompt}
-              onChange={(event) => change({ systemPrompt: event.target.value })}
-            />
-            <p className="hint">נשלחות לספק עם כל הודעה, אחרי הנחיות הבטיחות המובנות. עדיף לא לכתוב כאן פרטים מזהים עליה.</p>
+            {promptFor === 'parent' ? (
+              <textarea
+                key="parent"
+                id="system-prompt"
+                className="input"
+                rows={5}
+                dir="auto"
+                maxLength={MAX_SYSTEM_PROMPT_CHARS}
+                value={draft.parentSystemPrompt ?? ''}
+                onChange={(event) => change({ parentSystemPrompt: event.target.value })}
+              />
+            ) : (
+              <textarea
+                key="child"
+                id="system-prompt"
+                className="input"
+                rows={5}
+                dir="auto"
+                maxLength={MAX_SYSTEM_PROMPT_CHARS}
+                value={draft.systemPrompt}
+                onChange={(event) => change({ systemPrompt: event.target.value })}
+              />
+            )}
+            {promptFor === 'parent' ? (
+              <p className="hint">ההנחיות להורים: נשלחות לספק רק במצב הורים (כשהתיבה "האפליקציה בשימוש של ילדה" לא מסומנת), בלי הנחיות הבטיחות לילדים. הן אף פעם לא נשלחות עם הודעה שלה.</p>
+            ) : (
+              <p className="hint">ההנחיות לילדה: נשלחות לספק עם כל הודעה, אחרי הנחיות הבטיחות המובנות, רק כשהאפליקציה בשימוש של ילדה. במצב הורים הן לא נשלחות. עדיף לא לכתוב כאן פרטים מזהים עליה.</p>
+            )}
           </div>
           <div className="field">
             <label htmlFor="child-name">שם הילדה</label>

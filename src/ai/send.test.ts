@@ -158,9 +158,9 @@ describe('sendChat', () => {
 
   it("leaves the child baseline out only when a parent switched the app to their own use: then only the parent's own instructions go", async () => {
     const own = fetchStream([piece('hi'), DONE]);
-    await sendChat(request(own.fetch, { kidUse: false }));
+    await sendChat(request(own.fetch, { kidUse: false, parentSystemPrompt: 'Be brief.' }));
     expect(JSON.parse(own.calls[0].init.body as string).messages).toEqual([
-      { role: 'system', content: `${TODAY}\n\nAnswer in simple Hebrew.` },
+      { role: 'system', content: `${TODAY}\n\nBe brief.` },
       { role: 'user', content: 'שלום' },
     ]);
 
@@ -188,8 +188,8 @@ describe('sendChat', () => {
 
   it("keeps the lines about web text and files in a parent's own use, without the lines about a child", async () => {
     const search = fetchStream([piece('found'), DONE]);
-    await sendChat(request(search.fetch, { kidUse: false, webSearch: true }));
-    expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${SEARCH_BASELINE_PARENT} ${TODAY}\n\nAnswer in simple Hebrew.` });
+    await sendChat(request(search.fetch, { kidUse: false, webSearch: true, parentSystemPrompt: 'Be brief.' }));
+    expect(JSON.parse(search.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${SEARCH_BASELINE_PARENT} ${TODAY}\n\nBe brief.` });
 
     const file = fetchStream([piece('a cat'), DONE]);
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
