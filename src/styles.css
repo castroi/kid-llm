@@ -131,6 +131,35 @@ button:disabled {
   border-radius: 14px;
 }
 
+.update-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 0 12px 6px;
+  padding: 8px 14px;
+  font-size: 15px;
+  background: var(--accent-tint);
+  border: 1px solid var(--accent);
+  border-radius: 14px;
+}
+
+.update-notice p {
+  margin: 0;
+}
+
+.update-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.small-button.update-now {
+  color: var(--on-accent);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
 /* The only part that scrolls; the top bar and the composer stay in place. */
 .scroll {
   flex: 1;

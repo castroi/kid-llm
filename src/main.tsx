@@ -4,8 +4,10 @@ import { checkConnection, generateImage, listModels, sendChat } from './ai/send'
 import { App } from './app/App';
 import type { ParentServices } from './app/parentServices';
 import type { Services } from './app/useChat';
+import type { UpdateServices } from './app/useUpdateCheck';
 import { prepareAttachment, type PickedFile } from './core/attachment';
-import { APP_VERSION } from './core/version';
+import { fetchDeployedCommit } from './core/update';
+import { APP_COMMIT, APP_VERSION } from './core/version';
 import { openChatStore, requestPersistence, type ChatStore } from './storage/chatStore';
 import { checkPin, hasPin, lockedFor, setPin } from './storage/pin';
 import { forgetSetup, hasSetup, loadApiKey, loadSettings, saveApiKey, saveSettings } from './storage/settings';
@@ -110,13 +112,21 @@ function browserParentServices(store: ChatStore | null): ParentServices {
   };
 }
 
+/** The site's side of the update notice: which commit it serves now, asked of its own origin only. */
+const updates: UpdateServices = {
+  current: APP_COMMIT,
+  deployed: () => fetchDeployedCommit((input, init) => fetch(input, init)),
+  reload: () => window.location.reload(),
+  isOnline: () => navigator.onLine,
+};
+
 async function start() {
   // Without usable storage she can still chat; the app says that the chat wasn't saved.
   const store = await openChatStore().catch(() => null);
   void requestPersistence();
   createRoot(document.getElementById('root')!).render(
     <StrictMode>
-      <App services={browserServices(store)} parent={browserParentServices(store)} />
+      <App services={browserServices(store)} parent={browserParentServices(store)} updates={updates} />
     </StrictMode>,
   );
 }

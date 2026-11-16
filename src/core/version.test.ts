@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { APP_VERSION, appVersion, REPO_URL } from './version';
+import { APP_COMMIT, APP_VERSION, appVersion, REPO_URL } from './version';
 
 const SHA = '0123456789abcdef0123456789abcdef01234567';
 
@@ -28,5 +28,14 @@ describe('APP_VERSION', () => {
   it('is this build: a link into the repository and nowhere else', () => {
     expect(APP_VERSION.url).toMatch(/^https:\/\/github\.com\/castroi\/kid-llm(\/commit\/[0-9a-f]{40})?$/);
     expect(APP_VERSION.label).toMatch(/^(dev|[0-9a-f]{7})$/);
+  });
+});
+
+describe('APP_COMMIT', () => {
+  it('is the full commit of this build, or empty when the build does not know it', () => {
+    expect(APP_COMMIT).toMatch(/^([0-9a-f]{40})?$/);
+    // The same build the parent area names.
+    if (APP_COMMIT !== '') expect(APP_VERSION.label).toBe(APP_COMMIT.slice(0, 7));
+    else expect(APP_VERSION.label).toBe('dev');
   });
 });

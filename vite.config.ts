@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
+import type { Plugin } from 'vite';
 import vercel from './vercel.json';
 
 /**
@@ -28,8 +29,22 @@ const commit = process.env.VERCEL_GIT_COMMIT_SHA || head;
 // The date is git's, so it is taken only when git is looking at that same commit.
 const commitDate = commit !== '' && commit === head ? fromGit('%cI') : '';
 
+/**
+ * Writes version.json next to the app: the commit this build is, so an app left open on the
+ * phone can tell that a newer one was deployed (src/core/update.ts). Only a full commit name
+ * is written; a build that doesn't know its commit writes no file, and its app never asks.
+ */
+const versionFile: Plugin = {
+  name: 'version-file',
+  apply: 'build',
+  generateBundle() {
+    if (!/^[0-9a-f]{40}$/.test(commit)) return;
+    this.emitFile({ type: 'asset', fileName: 'version.json', source: `${JSON.stringify({ commit })}\n` });
+  },
+};
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), versionFile],
   define: {
     __APP_COMMIT__: JSON.stringify(commit),
     __APP_COMMIT_DATE__: JSON.stringify(commitDate),

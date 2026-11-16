@@ -25,3 +25,6 @@ export function appVersion(commit: string, commitDate: string): AppVersion {
 
 /** This build. */
 export const APP_VERSION: AppVersion = appVersion(__APP_COMMIT__, __APP_COMMIT_DATE__);
+
+/** The full commit this build was made from, or '' for a build that doesn't know it (then the app never looks for a newer one). */
+export const APP_COMMIT: string = /^[0-9a-f]{40}$/.test(__APP_COMMIT__) ? __APP_COMMIT__ : '';

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { canAttachIn } from '../core/attachment';
-import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE } from '../core/kidMessages';
+import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE, UPDATE_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
 import { fileModelFor, missingFor, modelFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
@@ -11,6 +11,7 @@ import { ModeSheet } from '../ui/ModeSheet';
 import { ParentArea } from '../ui/ParentArea';
 import type { ParentServices } from './parentServices';
 import { useChat, type Services } from './useChat';
+import { useUpdateCheck, type UpdateServices } from './useUpdateCheck';
 
 /** The chat screen: the opening with the modes, then the conversation, with the composer below. */
 /** What the screen needs to know about the setup: her name, which modes are ready and the model behind each, never the key itself. */
@@ -24,8 +25,9 @@ function readSetup(services: Services) {
   return { models, childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && fileModelFor(settings) !== '', parentUse: settings.parentUse === true };
 }
 
-export function App({ services, parent }: { services: Services; parent: ParentServices }) {
+export function App({ services, parent, updates }: { services: Services; parent: ParentServices; updates?: UpdateServices }) {
   const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat } = useChat(services);
+  const newVersion = useUpdateCheck(updates);
   const [inHistory, setInHistory] = useState(false);
   const [pickingMode, setPickingMode] = useState(false);
   const [inParentArea, setInParentArea] = useState(false);
@@ -92,6 +94,20 @@ export function App({ services, parent }: { services: Services; parent: ParentSe
         <p className="parent-use" role="note">
           {PARENT_USE_MESSAGE}
         </p>
+      )}
+      {/* Never while an answer is being written: loading the new version would cut it. */}
+      {newVersion.ready && !writing && (
+        <div className="update-notice" role="status">
+          <p>{UPDATE_MESSAGE}</p>
+          <div className="update-actions">
+            <button type="button" className="small-button update-now" onClick={newVersion.update}>
+              לעדכן
+            </button>
+            <button type="button" className="small-button" onClick={newVersion.later}>
+              אחר כך
+            </button>
+          </div>
+        </div>
       )}
 
       <main className="scroll">
