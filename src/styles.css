@@ -246,6 +246,12 @@ button:disabled {
   padding-inline-start: 4px;
 }
 
+/* On a narrow phone the model's name gives way; the buttons next to it keep their size. */
+.composer-tools > .mode-chip,
+.composer-tools > .icon-button {
+  flex: none;
+}
+
 /* Conversation */
 .conversation {
   display: flex;
