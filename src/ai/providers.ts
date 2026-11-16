@@ -448,7 +448,9 @@ const venice: ProviderAdapter = {
         stream: true,
         // Venice adds its own system prompt unless told not to; only the parent's goes with her chat.
         // Search mode always searches ("on"), so she gets what she picked; other modes never do.
-        venice_parameters: { include_venice_system_prompt: false, ...(webSearch ? { enable_web_search: 'on' } : {}) },
+        // In search mode only, Venice also reads up to 5 addresses written in her message
+        // (enable_web_scraping); for a message with an address that replaces the web search.
+        venice_parameters: { include_venice_system_prompt: false, ...(webSearch ? { enable_web_search: 'on', enable_web_scraping: true } : {}) },
       }),
       signal,
     };
