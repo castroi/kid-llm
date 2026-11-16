@@ -48,6 +48,10 @@ function fakeStore(): ChatStore & { saved: Chat[]; updated: Chat[] } {
     get: async () => undefined,
     all: async () => [],
     save: async (chat) => void saved.push(chat),
+    add: async (chat) => {
+      saved.push(chat);
+      return true;
+    },
     update: async (chat) => {
       updated.push(chat);
       return true;

@@ -82,8 +82,8 @@ export function BackupCard({ parent }: { parent: ParentServices }) {
       <button type="button" className="button" disabled={busy} onClick={() => picker.current?.click()}>
         ייבוא מקובץ גיבוי
       </button>
-      {/* The phone's own file picker opens from the button; this input is never seen. Any file can be picked: what it is comes from its first bytes. */}
-      <input ref={picker} className="visually-hidden" type="file" tabIndex={-1} aria-label="קובץ גיבוי לייבוא" onChange={(event) => void pick(event)} />
+      {/* The phone's own file picker opens from the button; this input is never seen, and is hidden from VoiceOver too (the button is what is used). Any file can be picked: what it is comes from its first bytes. */}
+      <input ref={picker} className="visually-hidden" type="file" tabIndex={-1} aria-hidden="true" aria-label="קובץ גיבוי לייבוא" onChange={(event) => void pick(event)} />
       <p className="status" role="status">
         {status}
       </p>
