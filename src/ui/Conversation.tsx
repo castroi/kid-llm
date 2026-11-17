@@ -167,8 +167,11 @@ export function Conversation({ messages, writing, onRetry, copyText, links = fal
   const lastText = messages[messages.length - 1]?.text;
   const lastHasPicture = messages[messages.length - 1]?.image !== undefined;
   // Keeps the newest text in view while an answer is being written, and a picture when it arrives.
+  // Only the conversation's own scrolling box moves: scrollIntoView would also scroll the page
+  // itself, and on the iPhone that left the top bar pushed up, even on the next screen.
   useEffect(() => {
-    end.current?.scrollIntoView?.({ block: 'end' });
+    const box = end.current?.closest('.scroll');
+    if (box) box.scrollTop = box.scrollHeight;
   }, [messages.length, lastText, lastHasPicture]);
 
   return (

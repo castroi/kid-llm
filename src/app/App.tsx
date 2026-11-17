@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { canAttachIn } from '../core/attachment';
 import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE, UPDATE_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
@@ -65,6 +65,12 @@ export function App({ services, parent, updates }: { services: Services; parent:
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [refreshSetup]);
+
+  // Going to or from the parent area swaps the screen inside the same page, so a page scrolled by
+  // the chat (the keyboard pushing it up) would stay scrolled, with the top bar above the screen.
+  useLayoutEffect(() => {
+    window.scrollTo(0, 0);
+  }, [inParentArea]);
 
   const blocked = setup.notSetUp.includes(mode);
   const empty = chat.messages.length === 0;
