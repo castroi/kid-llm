@@ -11,6 +11,7 @@ import { ModeSheet } from '../ui/ModeSheet';
 import { ParentArea } from '../ui/ParentArea';
 import type { ParentServices } from './parentServices';
 import { useChat, type Services } from './useChat';
+import { usePageAtTop } from './usePageAtTop';
 import { useUpdateCheck, type UpdateServices } from './useUpdateCheck';
 
 /** The chat screen: the opening with the modes, then the conversation, with the composer below. */
@@ -28,6 +29,7 @@ function readSetup(services: Services) {
 export function App({ services, parent, updates }: { services: Services; parent: ParentServices; updates?: UpdateServices }) {
   const { chat, mode, writing, notice, notSaved, setMode, send, stop, retry, startNewChat, listChats, openChat, renameChat } = useChat(services);
   const newVersion = useUpdateCheck(updates);
+  usePageAtTop();
   // She has started a message: loading the new version now would throw it away.
   const [drafting, setDrafting] = useState(false);
   const [inHistory, setInHistory] = useState(false);

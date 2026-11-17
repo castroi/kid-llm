@@ -1,11 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /*
- * The top bar stays on the screen. On the iPhone the chat could leave the page itself
- * scrolled (the keyboard pushing it up, or an answer scrolled into view), and the parent area
- * then opened with "אזור הורים" and "סיום" above the top of the screen. Here the page is made
- * taller than the screen on purpose, the way the keyboard makes it on a phone, so that a
- * page scroll can happen at all.
+ * The top bar stays on the screen. On the iPhone the keyboard pushes the page itself up, and
+ * after a filtered list got shorter iOS left it there once the keyboard closed: the top bar
+ * ("אזור הורים", "סיום") stayed under the status bar, blurred by iOS 26, with an empty strip
+ * at the bottom. Here the page is made taller than the screen on purpose, the way the
+ * keyboard makes it on a phone, so that a page scroll can happen at all.
  */
 
 /** A phone a parent has already set up, with one long chat in the app's own database. Nothing is sent to a provider. */
@@ -75,23 +75,40 @@ test('opening a chat scrolls the conversation, not the page', async ({ page }) =
   await expectOnScreen(page, 'שמיים', 'heading');
 });
 
-test('with a chat open and the page pushed up, the parent area opens with its top bar on the screen', async ({ page }) => {
+/** In the parent area, past the code, with the page able to scroll. */
+async function openParentArea(page: Page) {
   await setUpWithChat(page);
   await makePageScrollable(page);
   await page.getByRole('button', { name: 'השיחות שלי' }).tap();
-  await page.getByRole('dialog', { name: 'השיחות שלי' }).getByRole('button', { name: 'שמיים', exact: true }).tap();
-  await expect(page.getByRole('heading', { name: 'שמיים' })).toBeVisible();
+  await page.getByRole('button', { name: 'אזור הורים' }).tap();
+  await page.getByLabel('קוד חדש (4 עד 8 ספרות)').fill('2468');
+  await page.getByLabel('שוב, לאימות').fill('2468');
+  await page.getByRole('button', { name: 'שמירת הקוד' }).tap();
+  await expect(page.getByLabel('מפתח API')).toBeVisible();
+}
 
-  await page.getByRole('button', { name: 'השיחות שלי' }).tap();
-  // What the keyboard does on the iPhone while she types: the page goes up. (After the list of
-  // chats is open: it is fixed to the screen, so tapping in it doesn't scroll the page back.)
+test('in the parent area, the page pushed up by the keyboard goes back down once the field is left', async ({ page }) => {
+  await openParentArea(page);
+
+  // What the keyboard does on the iPhone: a field is typed in, and the page goes up to keep it in view.
+  const field = page.getByLabel('מפתח API');
+  await field.focus();
   await page.evaluate(() => window.scrollTo(0, 300));
+  // While she types, the page stays where the keyboard put it.
   expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
 
-  await page.getByRole('button', { name: 'אזור הורים' }).tap();
-  await expect(page.getByRole('heading', { name: 'אזור הורים' })).toBeVisible();
+  // The keyboard closes. iOS sometimes leaves the page up; the app brings it back.
+  await field.blur();
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+  await expectOnScreen(page, 'אזור הורים', 'heading');
+  await expectOnScreen(page, 'סיום', 'button');
+});
 
-  expect(await page.evaluate(() => window.scrollY)).toBe(0);
+test('in the parent area, a page scrolled with no field in use goes straight back to the top', async ({ page }) => {
+  await openParentArea(page);
+  await page.getByRole('heading', { name: 'חיבור' }).click();
+  await page.evaluate(() => window.scrollTo(0, 300));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   await expectOnScreen(page, 'אזור הורים', 'heading');
   await expectOnScreen(page, 'סיום', 'button');
 });
