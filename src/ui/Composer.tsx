@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
-import { AttachmentError, limitFor, MAX_DOCUMENTS, type Attachment, type AttachmentProblem, type LimitProblem } from '../core/attachment';
+import { AttachmentError, limitFor, MAX_DOCUMENTS, withinLimits, type Attachment, type AttachmentProblem, type LimitProblem } from '../core/attachment';
 import { MAX_MESSAGE_CHARS } from '../core/chat';
-import { NO_MORE_FILES_MESSAGE, PREPARING_FILES_MESSAGE, pickMessage } from '../core/kidMessages';
+import { limitMessage, NO_MORE_FILES_MESSAGE, PREPARING_FILES_MESSAGE, pickMessage } from '../core/kidMessages';
 import { modeName, type ModeId } from '../core/modes';
 import { BlobImage } from './BlobImage';
 import { fileLabel, FileName } from './FileName';
@@ -66,6 +66,8 @@ export function Composer({ mode, model, writing, blocked, attach, pictureLimit =
   const preparing = shown.some((item) => item.attachment === null);
   const pictures = ready.filter((a) => a.kind === 'image').length;
   const full = pictures >= pictureLimit && ready.length - pictures >= MAX_DOCUMENTS;
+  // The parent lowered how many pictures a message can carry while these waited: she is told, and takes some off before sending.
+  const tooMany = withinLimits(ready, pictureLimit).length < ready.length;
 
   const started = text.trim() !== '' || shown.length > 0;
   useEffect(() => {
@@ -90,7 +92,7 @@ export function Composer({ mode, model, writing, blocked, attach, pictureLimit =
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (preparing) return;
+    if (preparing || tooMany) return;
     if (onSend(text, ready)) {
       setText('');
       update(() => []);
@@ -211,7 +213,7 @@ export function Composer({ mode, model, writing, blocked, attach, pictureLimit =
       />
       {attach && (
         <p className="composer-status" role="status">
-          {preparing ? PREPARING_FILES_MESSAGE : problem}
+          {preparing ? PREPARING_FILES_MESSAGE : tooMany ? `${limitMessage(pictures > pictureLimit ? 'pictures' : 'size', pictureLimit)} צריך להסיר קובץ לפני השליחה.` : problem}
         </p>
       )}
       <div className="composer-row">
@@ -243,7 +245,7 @@ export function Composer({ mode, model, writing, blocked, attach, pictureLimit =
             <StopIcon />
           </button>
         ) : (
-          <button type="submit" className="round-button" aria-label="שליחה" disabled={blocked || preparing || text.trim() === ''}>
+          <button type="submit" className="round-button" aria-label="שליחה" disabled={blocked || preparing || tooMany || text.trim() === ''}>
             <SendIcon />
           </button>
         )}

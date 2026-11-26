@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { BACKUP_HEAD, BackupError, MAX_CHAT_TEXT_BYTES, backupHead, encodeChat, readBackup } from './backup';
+import { BACKUP_HEAD, BackupError, MAX_CHAT_FILE_BYTES, MAX_CHAT_TEXT_BYTES, backupHead, encodeChat, readBackup } from './backup';
 import { newChat, withMessage, type Chat } from './chat';
 
 const WEBP = new Uint8Array([82, 73, 70, 70, 0, 255, 7, 9]);
@@ -103,6 +103,30 @@ describe('a backup file', () => {
     const many = Array.from({ length: 11 }, () => ({ kind: 'pdf', bytes: PDF.byteLength }));
     const crafted = { id: 'c1', createdAt: 5, messages: [{ id: 'q', role: 'user', text: 'דף', at: 1, mode: 'chat', attachments: many }] };
     const { records, whole } = await readAll(fileOf(backupHead(), ...encodeChat(chat('c0', 1)), record(JSON.stringify(crafted)), ...many.map(() => PDF.slice())));
+    expect(whole).toBe(false);
+    expect(records).toEqual([chat('c0', 1)]);
+  });
+
+  it('stops at a chat that claims more bytes of files than a chat may hold, before reading any of them', async () => {
+    // Each claim is within one file's limit; together they are more than a chat may hold. The bytes are not even there.
+    const each = 4 * 1024 * 1024;
+    const count = Math.floor(MAX_CHAT_FILE_BYTES / each) + 1;
+    const messages = Array.from({ length: Math.ceil(count / 10) }, (_, i) => ({ id: `q${i}`, role: 'user', text: 'דף', at: 1, mode: 'chat', attachments: Array.from({ length: 10 }, () => ({ kind: 'image', bytes: each })) }));
+    const file = fileOf(backupHead(), ...encodeChat(chat('c0', 1)), record(JSON.stringify({ id: 'c1', createdAt: 5, messages })));
+    const asked: number[] = [];
+    // A file that says it is long enough for every claim, so only the limit can stop the reading.
+    const claimed = { size: MAX_CHAT_FILE_BYTES * 2, slice: (from = 0, to = 0) => (asked.push(to - from), file.slice(from, to)) };
+    const { records, whole } = await readAll(claimed);
+    expect(whole).toBe(false);
+    expect(records).toEqual([chat('c0', 1)]);
+    // The head, and each chat's length and text: no file's bytes were asked for.
+    expect(asked).toHaveLength(5);
+    expect(Math.max(...asked)).toBeLessThan(each);
+  });
+
+  it('stops at a message that holds both a list of files and a single one', async () => {
+    const crafted = { id: 'c1', createdAt: 5, messages: [{ id: 'q', role: 'user', text: 'דף', at: 1, mode: 'chat', attachments: [{ kind: 'pdf', bytes: PDF.byteLength }], attachment: { kind: 'pdf', bytes: PDF.byteLength } }] };
+    const { records, whole } = await readAll(fileOf(backupHead(), ...encodeChat(chat('c0', 1)), record(JSON.stringify(crafted)), PDF.slice(), PDF.slice()));
     expect(whole).toBe(false);
     expect(records).toEqual([chat('c0', 1)]);
   });

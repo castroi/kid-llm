@@ -171,7 +171,8 @@ export function useChat(services: Services): ChatController {
       // A call that carries a file goes to the model the parent chose for files. With none
       // chosen (the parent took it away since), the file stays on the phone and only the text goes.
       const fileModel = canAttachIn(forMode) ? fileModelFor(settings) : '';
-      const withFile = fileModel !== '' && talk.some((m) => (m.files ?? []).length > 0);
+      // Counted as sendChat counts it: only her messages carry files.
+      const withFile = fileModel !== '' && talk.some((m) => m.role === 'user' && (m.files ?? []).length > 0);
       // The model this call goes to; its name is kept with the answer and shown under it.
       const model = withFile ? fileModel : modelFor(forMode, settings);
       const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode, ...(model ? { model } : {}) };

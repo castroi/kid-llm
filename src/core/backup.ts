@@ -37,6 +37,12 @@ export const MAX_CHAT_TEXT_BYTES = 64 * 1024 * 1024;
 const MAX_FILE_BYTES = Math.max(MAX_IMAGE_BYTES, MAX_PICTURE_BYTES, MAX_DOCUMENT_BYTES);
 /** The most files one message holds. */
 const MAX_FILES_PER_MESSAGE = MAX_PICTURES + MAX_DOCUMENTS;
+/**
+ * The most bytes of pictures and files one chat may claim. A chat's files are all read before the
+ * chat is checked, so without this a crafted file could make the phone hold as much as the file is
+ * long. Far more than a real chat holds; a record that claims more is damaged.
+ */
+export const MAX_CHAT_FILE_BYTES = 256 * 1024 * 1024;
 
 /** The fields of a message that hold bytes, in the order they are written: a list of files, one file (version 1), a drawn picture. */
 const FILE_FIELDS = ['attachments', 'attachment', 'image'] as const;
@@ -148,23 +154,35 @@ export async function readBackup(file: BackupSource, onRecord: (chat: Chat | nul
     // The bytes that follow belong to the pictures and files the text names, in its order.
     // A length that makes no sense leaves no way to find the next chat: the reading ends there.
     const messages: unknown[] = raw && typeof raw === 'object' && Array.isArray((raw as { messages?: unknown }).messages) ? (raw as { messages: unknown[] }).messages : [];
+    // Every holder of bytes the chat names, checked before any of them is read: a chat that
+    // claims too many files, or more bytes than a chat may hold, is damaged, and nothing of it is read.
+    const holders: Record<string, unknown>[] = [];
+    let chatBytes = 0;
     for (const message of messages) {
       if (!message || typeof message !== 'object') continue;
+      // A message holds a list of files or, in a file made before there were lists, one: never both.
+      if ('attachments' in message && 'attachment' in message) return false;
       for (const field of FILE_FIELDS) {
         const value = (message as Record<string, unknown>)[field];
         // A list holds one file per entry; more than a message can hold means the file is damaged.
-        const holders: unknown[] = field === 'attachments' ? (Array.isArray(value) ? value : []) : [value];
-        if (holders.length > MAX_FILES_PER_MESSAGE) return false;
-        for (const holder of holders) {
+        const named: unknown[] = field === 'attachments' ? (Array.isArray(value) ? value : []) : [value];
+        if (named.length > MAX_FILES_PER_MESSAGE) return false;
+        for (const holder of named) {
           if (!holder || typeof holder !== 'object') continue;
           const wanted = (holder as Record<string, unknown>).bytes;
           if (typeof wanted !== 'number' || !Number.isInteger(wanted) || wanted < 1 || wanted > MAX_FILE_BYTES) return false;
-          const bytes = await read(at, wanted);
-          if (!bytes) return false;
-          at += wanted;
-          (holder as Record<string, unknown>).bytes = bytes;
+          chatBytes += wanted;
+          if (chatBytes > MAX_CHAT_FILE_BYTES) return false;
+          holders.push(holder as Record<string, unknown>);
         }
       }
+    }
+    for (const holder of holders) {
+      const wanted = holder.bytes as number;
+      const bytes = await read(at, wanted);
+      if (!bytes) return false;
+      at += wanted;
+      holder.bytes = bytes;
     }
     await onRecord(sanitizeChat(raw));
   }
