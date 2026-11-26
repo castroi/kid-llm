@@ -29,15 +29,18 @@ function lastRun(storage: KeyValue): number | null {
 }
 
 /**
- * Trims the files that are due (src/core/trim.ts) in every chat on the phone except `skipChatId`
- * (the chat on the screen, which the app holds in memory and would save back whole). Runs at
+ * Trims the files that are due (src/core/trim.ts) in every chat on the phone except those `skip`
+ * names, asked again before each chat (the chat on the screen, which the app holds in memory and
+ * would save back whole, and every chat while an answer is being written). Age is counted up to
+ * the newest use of the app, never past it: a phone clock set ahead trims nothing until she has
+ * used the app at that time. Runs at
  * most once a day: a run that stops early (too many pictures, a full phone, a failure) is
  * picked up again the next time. Each chat is read, its pictures are made small one at a time,
  * and only then is it written, through `ChatStore.edit`, which checks the chat as it is at that
  * moment: what she wrote meanwhile is never lost. Resolves with how many chats were changed;
  * never rejects.
  */
-export async function trimOldFiles(services: TrimServices, skipChatId: string): Promise<number> {
+export async function trimOldFiles(services: TrimServices, skip: (chatId: string) => boolean): Promise<number> {
   const storage = services.storage ?? localStorage;
   const now = services.now();
   const last = lastRun(storage);
@@ -47,11 +50,14 @@ export async function trimOldFiles(services: TrimServices, skipChatId: string): 
   let changed = 0;
   let budget = MAX_PICTURES_PER_RUN;
   try {
-    for (const { id } of await services.store.list()) {
-      if (id === skipChatId) continue;
+    const summaries = await services.store.list();
+    // The newest use of the app: a clock set ahead since then can't make files look older than they are.
+    const until = Math.min(now, Math.max(0, ...summaries.map((summary) => summary.updatedAt)));
+    for (const { id } of summaries) {
+      if (skip(id)) continue;
       const chat = await services.store.get(id);
       if (!chat) continue;
-      const due = dueTrims(chat, now);
+      const due = dueTrims(chat, until);
       if (due.length === 0) continue;
       const thumbnails = new Map<string, ArrayBuffer | null>();
       for (const trim of due) {
@@ -67,7 +73,9 @@ export async function trimOldFiles(services: TrimServices, skipChatId: string): 
         }
         await pause();
       }
-      if (await services.store.edit(id, (current) => withTrimmed(current, now, thumbnails))) changed += 1;
+      // Opened, or written to, while its pictures were being made small: left for the next run.
+      if (skip(id)) continue;
+      if (await services.store.edit(id, (current) => withTrimmed(current, until, thumbnails))) changed += 1;
       if (budget === 0) return changed;
     }
   } catch {

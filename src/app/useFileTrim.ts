@@ -9,7 +9,7 @@ export const TRIM_DELAY_MS = 5_000;
  * it again); the cleanup itself runs at most once a day. Never while an answer is being written,
  * never twice at once, and never on the chat on the screen.
  */
-export function useFileTrim(run: ((skipChatId: string) => Promise<unknown>) | undefined, chatId: string, writing: boolean, delayMs: number = TRIM_DELAY_MS): void {
+export function useFileTrim(run: ((skip: (chatId: string) => boolean) => Promise<unknown>) | undefined, chatId: string, writing: boolean, delayMs: number = TRIM_DELAY_MS): void {
   const current = useRef({ chatId, writing });
   useEffect(() => {
     current.current = { chatId, writing };
@@ -24,7 +24,8 @@ export function useFileTrim(run: ((skipChatId: string) => Promise<unknown>) | un
       timer = setTimeout(() => {
         if (running || current.current.writing || document.visibilityState === 'hidden') return;
         running = true;
-        run(current.current.chatId)
+        // Asked again before each chat: the chat she opens meanwhile, and every chat while an answer is being written, are left alone.
+        run((id) => current.current.writing || id === current.current.chatId)
           .catch(() => undefined)
           .finally(() => {
             running = false;

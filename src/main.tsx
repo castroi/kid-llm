@@ -93,8 +93,8 @@ function browserServices(store: ChatStore | null): Services {
     // The small copy of an old picture is drawn the same way as any picture she attaches: only what is seen.
     ...(store
       ? {
-          trimOldFiles: (skipChatId: string) =>
-            trimOldFiles({ store, now: () => Date.now(), thumbnail: (bytes) => encodeImage(new Blob([bytes], { type: 'image/jpeg' }), THUMBNAIL_SIDE, THUMBNAIL_QUALITY) }, skipChatId),
+          trimOldFiles: (skip: (chatId: string) => boolean) =>
+            trimOldFiles({ store, now: () => Date.now(), thumbnail: (bytes) => encodeImage(new Blob([bytes], { type: 'image/jpeg' }), THUMBNAIL_SIDE, THUMBNAIL_QUALITY) }, skip),
         }
       : {}),
   };

@@ -2,6 +2,8 @@ import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TRIM_DELAY_MS, useFileTrim } from './useFileTrim';
 
+type Run = (skip: (chatId: string) => boolean) => Promise<number>;
+
 let visibility: DocumentVisibilityState = 'visible';
 beforeEach(() => {
   vi.useFakeTimers();
@@ -20,27 +22,34 @@ function comeBack() {
 
 describe('starting the cleanup of old files', () => {
   it('starts a little after the app opens, skipping the chat on the screen', async () => {
-    const run = vi.fn(async () => 0);
-    renderHook(() => useFileTrim(run, 'shown-chat', false));
+    const run = vi.fn<Run>(async () => 0);
+    const { rerender } = renderHook(({ id, writing }) => useFileTrim(run, id, writing), { initialProps: { id: 'shown-chat', writing: false } });
     await vi.advanceTimersByTimeAsync(TRIM_DELAY_MS - 1);
     expect(run).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect(run).toHaveBeenCalledWith('shown-chat');
+    const skip = run.mock.calls[0][0];
+    expect([skip('shown-chat'), skip('other')]).toEqual([true, false]);
+    // Asked again later: the chat she opened since, and every chat while an answer is being written.
+    rerender({ id: 'other', writing: false });
+    expect([skip('shown-chat'), skip('other')]).toEqual([false, true]);
+    rerender({ id: 'other', writing: true });
+    expect(skip('shown-chat')).toBe(true);
   });
 
   it('starts again each time the app comes back to the screen, with the chat shown then', async () => {
-    const run = vi.fn(async () => 0);
+    const run = vi.fn<Run>(async () => 0);
     const { rerender } = renderHook(({ id }) => useFileTrim(run, id, false), { initialProps: { id: 'first' } });
     await vi.advanceTimersByTimeAsync(TRIM_DELAY_MS);
     rerender({ id: 'second' });
     comeBack();
     await vi.advanceTimersByTimeAsync(TRIM_DELAY_MS);
-    expect(run.mock.calls).toEqual([['first'], ['second']]);
+    expect(run).toHaveBeenCalledTimes(2);
+    expect(run.mock.calls[1][0]('second')).toBe(true);
   });
 
   it('does not start while an answer is being written, off the screen, or while it still runs', async () => {
     let finish: () => void = () => undefined;
-    const run = vi.fn(() => new Promise<number>((resolve) => (finish = () => resolve(0))));
+    const run = vi.fn<Run>(() => new Promise<number>((resolve) => (finish = () => resolve(0))));
     const { rerender } = renderHook(({ writing }) => useFileTrim(run, 'c', writing), { initialProps: { writing: true } });
     await vi.advanceTimersByTimeAsync(TRIM_DELAY_MS);
     expect(run).not.toHaveBeenCalled();

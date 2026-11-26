@@ -36,7 +36,7 @@ export interface Services {
    * Trims the files that are older than two weeks in every chat but the one on the screen
    * (src/storage/trimFiles.ts). Absent when nothing is kept on this phone.
    */
-  trimOldFiles?: (skipChatId: string) => Promise<unknown>;
+  trimOldFiles?: (skip: (chatId: string) => boolean) => Promise<unknown>;
 }
 
 /**
