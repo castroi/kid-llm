@@ -151,6 +151,9 @@ describe('displayName', () => {
     expect(displayName('/private/var/דף\n עבודה.pdf')).toBe('דף עבודה.pdf');
     expect(displayName('invoice\u202Efdp.exe')).toBe('invoicefdp.exe');
     expect(displayName(`${'a'.repeat(200)}.pdf`)).toHaveLength(MAX_FILE_NAME_CHARS);
+    // A long name keeps its type, so the screen can still show what it is.
+    expect(displayName(`סיכום שיעור היסטוריה על מלחמת העולם הראשונה ועל מה שקרה אחריה.pdf`)).toMatch(/^סיכום .*\.pdf$/);
+    expect(displayName(`סיכום שיעור היסטוריה על מלחמת העולם הראשונה ועל מה שקרה אחריה.pdf`).length).toBeLessThanOrEqual(MAX_FILE_NAME_CHARS);
     expect(displayName(42)).toBe('');
   });
 });

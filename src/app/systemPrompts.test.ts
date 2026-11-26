@@ -47,7 +47,7 @@ async function send(request: Partial<ChatRequest>, options: { webSearch?: boolea
     const answer = `data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\ndata: [DONE]\n\n`;
     return Promise.resolve(new Response(answer, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }));
   };
-  const messages: ChatMessage[] = [{ role: 'user', content: 'שלום', ...(options.withFile ? { file: { kind: 'image' as const, bytes: JPEG } } : {}) }];
+  const messages: ChatMessage[] = [{ role: 'user', content: 'שלום', ...(options.withFile ? { files: [{ kind: 'image' as const, bytes: JPEG, number: 1 }] } : {}) }];
   await sendChat({
     provider: 'venice',
     model: 'some-model',

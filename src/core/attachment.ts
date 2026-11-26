@@ -78,11 +78,14 @@ export class AttachmentError extends Error {
 // eslint-disable-next-line no-control-regex
 const NOT_FOR_A_NAME = /[\u0000-\u001F\u007F\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]/g;
 
-/** A file's name as it may be shown: the last part of a path, on one line, without hidden characters, cut short. */
+/** A file's name as it may be shown: the last part of a path, on one line, without hidden characters, cut short, its type (".pdf") kept. */
 export function displayName(name: unknown): string {
   if (typeof name !== 'string') return '';
   const last = name.split(/[\\/]/).pop() ?? '';
-  return cut(last.replace(NOT_FOR_A_NAME, '').replace(/\s+/g, ' ').trim(), MAX_FILE_NAME_CHARS);
+  const clean = last.replace(NOT_FOR_A_NAME, '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= MAX_FILE_NAME_CHARS) return clean;
+  const type = /\.[A-Za-z0-9]{1,5}$/.exec(clean)?.[0] ?? '';
+  return `${cut(clean.slice(0, clean.length - type.length), MAX_FILE_NAME_CHARS - type.length).trimEnd()}${type}`;
 }
 
 const bytesFor = (kind: FileKind) => (kind === 'image' ? MAX_PICTURE_BYTES : MAX_DOCUMENT_BYTES);

@@ -132,7 +132,8 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const apiKey = usableKey(req.apiKey);
   // A search call never carries a file: what goes into a search also reaches a search engine.
   const messages: ChatMessage[] = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
-  const withFile = messages.some((message) => (message.files ?? []).length > 0);
+  // Only her messages carry files (an answer's are never sent), so only hers bring the lines about files.
+  const withFile = messages.some((message) => message.role === 'user' && (message.files ?? []).length > 0);
   // One switch picks the built-in lines and the written ones, so a child's call can't carry
   // what was written for a parent, and a parent's can't carry what was written for her.
   const kidUse = req.kidUse !== false;
