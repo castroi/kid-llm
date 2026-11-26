@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { filterModels, isModelId, looksUncensored, MAX_MODEL_ID_CHARS, MAX_MODEL_NAME_CHARS, MAX_MODELS, modelsFor, priceText, sanitizeModels, type ModelInfo } from './models';
+import { filterModels, isModelId, looksUncensored, MAX_LISTED_IMAGES, MAX_MODEL_ID_CHARS, MAX_MODEL_NAME_CHARS, MAX_MODELS, modelsFor, priceText, sanitizeModels, type ModelInfo } from './models';
 
 /** One model as Venice's list gives it. */
 function entry(id: string, spec: Record<string, unknown> = {}, type = 'text') {
@@ -8,7 +8,7 @@ function entry(id: string, spec: Record<string, unknown> = {}, type = 'text') {
 }
 
 function model(id: string, extra: Partial<ModelInfo> = {}): ModelInfo {
-  return { id, name: id, kind: 'text', privacy: 'private', uncensored: false, tee: false, e2ee: false, webSearch: false, vision: false, price: null, ...extra };
+  return { id, name: id, kind: 'text', privacy: 'private', uncensored: false, tee: false, e2ee: false, webSearch: false, vision: false, maxImages: 1, price: null, ...extra };
 }
 
 describe('sanitizeModels', () => {
@@ -19,21 +19,44 @@ describe('sanitizeModels', () => {
           name: 'Deep Flash',
           privacy: 'anonymized',
           uncensored: true,
-          capabilities: { supportsTeeAttestation: true, supportsE2EE: true, supportsWebSearch: true, supportsVision: true },
+          capabilities: { supportsTeeAttestation: true, supportsE2EE: true, supportsWebSearch: true, supportsVision: true, supportsMultipleImages: true, maxImages: 10 },
           pricing: { input: { usd: 0.15, diem: 0.15 }, output: { usd: 1.25 }, cache_input: { usd: 0.03 }, cache_write: { usd: 0.2 } },
           description: 'never kept',
         }),
       ],
     };
     expect(sanitizeModels(raw, 'text')).toEqual([
-      { id: 'deep-flash', name: 'Deep Flash', kind: 'text', privacy: 'anonymized', uncensored: true, tee: true, e2ee: true, webSearch: true, vision: true, price: { min: 0.03, max: 1.25 } },
+      { id: 'deep-flash', name: 'Deep Flash', kind: 'text', privacy: 'anonymized', uncensored: true, tee: true, e2ee: true, webSearch: true, vision: true, maxImages: 10, price: { min: 0.03, max: 1.25 } },
     ]);
   });
 
   it('gives a plain model no tags, and no price when the provider sent none or sent something else', () => {
     const [plain, odd] = sanitizeModels({ data: [entry('plain'), entry('odd', { privacy: 'public', uncensored: 'yes', capabilities: 'all', pricing: { input: { usd: '1' }, output: { usd: -1 }, cache_input: { usd: Number.NaN } } })] }, 'text');
-    expect(plain).toEqual({ id: 'plain', name: 'PLAIN', kind: 'text', privacy: 'private', uncensored: false, tee: false, e2ee: false, webSearch: false, vision: false, price: null });
+    expect(plain).toEqual({ id: 'plain', name: 'PLAIN', kind: 'text', privacy: 'private', uncensored: false, tee: false, e2ee: false, webSearch: false, vision: false, maxImages: 1, price: null });
     expect(odd).toMatchObject({ privacy: null, uncensored: false, tee: false, webSearch: false, price: null });
+  });
+
+  it('reads how many pictures a model takes in one message: 1 unless the provider says it takes more', () => {
+    const raw = {
+      data: [
+        entry('many', { capabilities: { supportsVision: true, supportsMultipleImages: true, maxImages: 20 } }),
+        entry('one', { capabilities: { supportsVision: true, supportsMultipleImages: false } }),
+        entry('unsaid', { capabilities: { supportsVision: true, supportsMultipleImages: true } }),
+        entry('odd', { capabilities: { supportsVision: true, supportsMultipleImages: true, maxImages: 2.5 } }),
+        entry('zero', { capabilities: { supportsVision: true, supportsMultipleImages: true, maxImages: 0 } }),
+        entry('huge', { capabilities: { supportsVision: true, supportsMultipleImages: true, maxImages: 1e9 } }),
+        entry('contradicts', { capabilities: { supportsVision: true, supportsMultipleImages: false, maxImages: 10 } }),
+      ],
+    };
+    expect(sanitizeModels(raw, 'text').map((m) => [m.id, m.maxImages])).toEqual([
+      ['many', 20],
+      ['one', 1],
+      ['unsaid', 1],
+      ['odd', 1],
+      ['zero', 1],
+      ['huge', MAX_LISTED_IMAGES],
+      ['contradicts', 1],
+    ]);
   });
 
   it('leaves out offline models, models of another kind, and repeated names', () => {

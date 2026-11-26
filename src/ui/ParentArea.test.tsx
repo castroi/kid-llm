@@ -314,10 +314,14 @@ describe('the settings', () => {
     expect(screen.getByText(/ריק = היא לא יכולה לצרף קבצים/)).toBeInTheDocument();
     expect(screen.getByText(/מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת/)).toBeInTheDocument();
     expect(screen.getByText(/מסמך נשלח כמו שהוא, עם כל מה שכתוב בו וגם מה שלא רואים בו: שם מי שכתב אותו, הערות, שינויים שנמחקו ותמונות שבתוכו/)).toBeInTheDocument();
-    expect(screen.getByText(/ושוב עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קובץ אחר; כל שליחה כזאת עולה כסף\. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב/)).toBeInTheDocument();
+    expect(screen.getByText(/היא יכולה לצרף להודעה כמה קבצים: עד 5 מסמכים \(PDF או Word\), ותמונות כמה שהמודל קורא בהודעה אחת, עד 5/)).toBeInTheDocument();
+    expect(screen.getByText(/ושוב כולם עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קבצים אחרים; כל שליחה כזאת עולה כסף, וכל קובץ מוסיף למחיר\. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב/)).toBeInTheDocument();
+    expect(screen.getByText(/השמות שלה לקבצים לא נשלחים: הספק מקבל רק מספר לכל קובץ/)).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת'), 'vision-model');
     await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
     expect(phone.settings.fileModel).toBe('vision-model');
+    // Typed by hand, with no list to ask: how many pictures it reads is not known.
+    expect(phone.settings.fileModelImages).toBeUndefined();
   });
 
   it('offers a model for every mode, and says what each one sends', async () => {
@@ -628,12 +632,12 @@ describe('the version line', () => {
 
 describe('the model picker', () => {
   function model(id: string, extra: Partial<ModelInfo> = {}): ModelInfo {
-    return { id, name: id, kind: 'text', privacy: 'private', uncensored: false, tee: false, e2ee: false, webSearch: false, vision: false, price: null, ...extra };
+    return { id, name: id, kind: 'text', privacy: 'private', uncensored: false, tee: false, e2ee: false, webSearch: false, vision: false, maxImages: 1, price: null, ...extra };
   }
   const MODELS: ModelInfo[] = [
     model('deepseek-v4-1-flash', { name: 'DeepSeek V4.1 Flash', privacy: 'anonymized', tee: true, e2ee: true, price: { min: 0.03, max: 1.25 } }),
     model('llama-3.3-70b', { name: 'Llama 3.3 70B', webSearch: true, price: { min: 0.6, max: 0.6 } }),
-    model('qwen3-vl', { name: 'Qwen 3 VL', vision: true }),
+    model('qwen3-vl', { name: 'Qwen 3 VL', vision: true, maxImages: 10 }),
     model('wild-model', { name: 'Wild Model', uncensored: true, webSearch: true, vision: true }),
     model('paint-model', { name: 'Paint Model', kind: 'image' }),
   ];
@@ -704,6 +708,21 @@ describe('the model picker', () => {
     await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
     expect(phone.settings.models.chat).toBe('deepseek-v4-1-flash');
     expect(phone.settings.uncensored).toBeUndefined();
+  });
+
+  it('saves how many pictures the model for files reads, from the list, and keeps it only for that model', async () => {
+    const { phone } = await openWithList();
+    await userEvent.click(listButton(FILES));
+    await userEvent.click(screen.getByRole('button', { name: /qwen3-vl/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings).toMatchObject({ fileModel: 'qwen3-vl', fileModelImages: 10 });
+
+    // Another model typed by hand, which the list doesn't know: the number is not carried over to it.
+    await userEvent.clear(screen.getByLabelText(FILES));
+    await userEvent.type(screen.getByLabelText(FILES), 'other-reader');
+    await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
+    expect(phone.settings.fileModel).toBe('other-reader');
+    expect(phone.settings.fileModelImages).toBeUndefined();
   });
 
   it("shows each model's tags and its price for a million tokens, left to right", async () => {

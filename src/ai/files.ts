@@ -18,8 +18,21 @@ export const FILE_TYPES: Record<FileKind, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 };
 
-/** The name a document is sent under: a fixed one, because her own file name can hold her name or her school's. */
-export const SENT_FILE_NAMES: Record<Exclude<FileKind, 'image'>, string> = { pdf: 'document.pdf', docx: 'document.docx' };
+/**
+ * A file as it goes with one message: with its number in that message (from 1, in the order
+ * she added the files), the number the screen shows her, so she can ask about "קובץ 2".
+ */
+export interface SentFile extends ChatFile {
+  number: number;
+}
+
+/**
+ * The name a document is sent under: a made-up one with its number (`file-2.pdf`), because her
+ * own file name can hold her name or her school's.
+ */
+export function sentFileName(kind: Exclude<FileKind, 'image'>, number: number): string {
+  return `file-${number}.${kind}`;
+}
 
 /** How each kind of file starts. A file is what its first bytes say, never what its name or declared type says. */
 const SIGNATURES: Record<FileKind, readonly number[]> = {

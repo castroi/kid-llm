@@ -85,7 +85,7 @@ test('a backup file brings the chats and their pictures back after "delete all",
   const file = readFileSync(path);
 
   // The file is this app's backup, holds her chat and the picture's own bytes, and nothing of the setup.
-  expect(file.subarray(0, 17).toString('latin1')).toBe('kid-llm backup 1\n');
+  expect(file.subarray(0, 17).toString('latin1')).toBe('kid-llm backup 2\n');
   expect(file.includes(Buffer.from('חתול על סקייטבורד'))).toBe(true);
   expect(file.includes(Buffer.from(PICTURE))).toBe(true);
   expect(file.includes(Buffer.from('not-a-real-key'))).toBe(false);

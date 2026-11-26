@@ -313,22 +313,122 @@ input.visually-hidden {
   overflow-wrap: anywhere;
 }
 
-/* What she attached, inside her own message. */
+/* What she attached, inside her own message: pictures in a grid of two when there are more, then documents. */
+.attached-pictures {
+  display: grid;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.attached-pictures.grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.attached-picture-button {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: transparent;
+}
+
 .attached-picture {
   display: block;
   max-width: 100%;
   max-height: 240px;
-  margin-bottom: 8px;
   border-radius: 14px;
+}
+
+.attached-pictures.grid .attached-picture {
+  width: 100%;
+  max-height: none;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
+.attached-picture-button .attachment-number {
+  position: absolute;
+  top: 6px;
+  inset-inline-start: 6px;
 }
 
 .attached-file {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   margin-bottom: 8px;
   font-size: 15px;
-  overflow-wrap: anywhere;
+}
+
+/* A file's name on one line: the start gives way, the end with its type stays in view. */
+.file-name {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.file-name-start {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-name-end {
+  flex: none;
+}
+
+/* A file's number, as she can ask about it ("בקובץ 2"). */
+.attachment-number {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 6px;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+}
+
+/* A picture she attached, over the whole screen. */
+.viewer-layer {
+  justify-content: center;
+  align-items: center;
+}
+
+.viewer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 100%;
+  padding: calc(12px + env(safe-area-inset-top)) 12px calc(12px + env(safe-area-inset-bottom));
+}
+
+.viewer-close {
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.viewer-picture {
+  display: block;
+  max-width: 100%;
+  max-height: calc(100vh - 120px);
+  object-fit: contain;
+  border-radius: 14px;
+  background: var(--surface);
 }
 
 .answer {
@@ -483,23 +583,59 @@ input.visually-hidden {
   color: var(--muted);
 }
 
-/* A file waiting to be sent with the message. */
+/* The files waiting to be sent with the message: they wrap onto a second line rather than scroll out of sight. */
+.attachment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .attachment-chip {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-inline-start: 12px;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  padding-inline-start: 8px;
   font-size: 15px;
   background: var(--accent-tint);
   border-radius: 14px;
 }
 
-.attachment-name {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.attachment-thumb,
+.attachment-waiting {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 3px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
 }
 
 .composer-status {

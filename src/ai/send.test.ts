@@ -193,7 +193,7 @@ describe('sendChat', () => {
 
     const file = fetchStream([piece('a cat'), DONE]);
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
-    await sendChat(request(file.fetch, { kidUse: false, systemPrompt: '', messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
+    await sendChat(request(file.fetch, { kidUse: false, systemPrompt: '', messages: [{ role: 'user', content: 'מה יש בתמונה?', files: [{ kind: 'image', bytes: jpeg, number: 1 }] }] }));
     expect(JSON.parse(file.calls[0].init.body as string).messages[0]).toEqual({ role: 'system', content: `${FILE_BASELINE_PARENT} ${TODAY}` });
 
     for (const lines of [SEARCH_BASELINE_PARENT, FILE_BASELINE_PARENT]) {
@@ -316,10 +316,10 @@ describe('sendChat', () => {
     expect(none.calls).toHaveLength(0);
   });
 
-  it('sends a picture she attached inside the request, after her text, and adds the lines about files to the instructions', async () => {
+  it('sends a picture she attached inside the request, after her text and its number, and adds the lines about files to the instructions', async () => {
     const { fetch, calls } = fetchStream([piece('זה חתול'), DONE]);
     const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
-    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'מה יש בתמונה?', file: { kind: 'image', bytes: jpeg } }] }));
+    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'מה יש בתמונה?', files: [{ kind: 'image', bytes: jpeg, number: 1 }] }] }));
     const body = JSON.parse(calls[0].init.body as string);
     expect(calls[0].url).toBe(AI_PROVIDERS.venice.endpoints.chat);
     expect(body.messages[0].content).toBe(`${BASELINE_PROMPT} ${FILE_BASELINE} ${TODAY}\n\nAnswer in simple Hebrew.`);
@@ -327,23 +327,53 @@ describe('sendChat', () => {
       role: 'user',
       content: [
         { type: 'text', text: 'מה יש בתמונה?' },
+        { type: 'text', text: 'Picture 1:' },
         { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/' } },
       ],
     });
   });
 
-  it('sends a document under a fixed name, never her own file name', async () => {
+  it('sends a document under a made-up name with its number, never her own file name', async () => {
     const { fetch, calls } = fetchStream([piece('סיכום'), DONE]);
     const pdf = new TextEncoder().encode('Hi').buffer;
-    const withName = { kind: 'pdf', bytes: pdf, name: 'נועה כהן כיתה ה2.pdf' } as const;
-    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'תסכמי', file: withName }] }));
+    const withName = { kind: 'pdf', bytes: pdf, number: 1, name: 'נועה כהן כיתה ה2.pdf' } as const;
+    await sendChat(request(fetch, { messages: [{ role: 'user', content: 'תסכמי', files: [withName] }] }));
     const sent = calls[0].init.body as string;
-    expect(JSON.parse(sent).messages[1].content[1]).toEqual({ type: 'file', file: { file_data: 'data:application/pdf;base64,SGk=', filename: 'document.pdf' } });
+    expect(JSON.parse(sent).messages[1].content[1]).toEqual({ type: 'file', file: { file_data: 'data:application/pdf;base64,SGk=', filename: 'file-1.pdf' } });
     expect(sent).not.toContain('נועה');
 
     const word = fetchStream([piece('סיכום'), DONE]);
-    await sendChat(request(word.fetch, { messages: [{ role: 'user', content: 'תסכמי', file: { kind: 'docx', bytes: pdf } }] }));
-    expect(JSON.parse(word.calls[0].init.body as string).messages[1].content[1].file.filename).toBe('document.docx');
+    await sendChat(request(word.fetch, { messages: [{ role: 'user', content: 'תסכמי', files: [{ kind: 'docx', bytes: pdf, number: 3 }] }] }));
+    expect(JSON.parse(word.calls[0].init.body as string).messages[1].content[1].file.filename).toBe('file-3.docx');
+  });
+
+  it('sends several files in one message, her text first, then each by its number in her order', async () => {
+    const { fetch, calls } = fetchStream([piece('הנה'), DONE]);
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
+    const pdf = new TextEncoder().encode('Hi').buffer;
+    await sendChat(
+      request(fetch, {
+        messages: [
+          {
+            role: 'user',
+            content: 'מה ההבדל?',
+            files: [
+              { kind: 'image', bytes: jpeg, number: 1 },
+              { kind: 'pdf', bytes: pdf, number: 2 },
+              { kind: 'image', bytes: jpeg, number: 4 },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(JSON.parse(calls[0].init.body as string).messages[1].content).toEqual([
+      { type: 'text', text: 'מה ההבדל?' },
+      { type: 'text', text: 'Picture 1:' },
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/' } },
+      { type: 'file', file: { file_data: 'data:application/pdf;base64,SGk=', filename: 'file-2.pdf' } },
+      { type: 'text', text: 'Picture 4:' },
+      { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/' } },
+    ]);
   });
 
   it('sends a message without a file as plain text, without the lines about files, and never a file on an answer', async () => {
@@ -353,7 +383,8 @@ describe('sendChat', () => {
       request(fetch, {
         messages: [
           { role: 'user', content: 'שלום' },
-          { role: 'assistant', content: 'היי', file: { kind: 'image', bytes } },
+          { role: 'assistant', content: 'היי', files: [{ kind: 'image', bytes, number: 1 }] },
+          { role: 'user', content: 'ועוד', files: [] },
           { role: 'user', content: 'מה שלומך?' },
         ],
       }),
@@ -362,8 +393,10 @@ describe('sendChat', () => {
     expect(body.messages.slice(1)).toEqual([
       { role: 'user', content: 'שלום' },
       { role: 'assistant', content: 'היי' },
+      { role: 'user', content: 'ועוד' },
       { role: 'user', content: 'מה שלומך?' },
     ]);
+    expect(body.messages[0].content).not.toContain(FILE_BASELINE);
     const plain = fetchStream([piece('היי'), DONE]);
     await sendChat(request(plain.fetch));
     expect(JSON.parse(plain.calls[0].init.body as string).messages[0].content).not.toContain(FILE_BASELINE);
@@ -372,7 +405,7 @@ describe('sendChat', () => {
   it('never sends a file with a web search', async () => {
     const { fetch, calls } = fetchStream([piece('מצאתי'), DONE]);
     const bytes = new Uint8Array([0xff, 0xd8, 0xff]).buffer;
-    await sendChat(request(fetch, { webSearch: true, messages: [{ role: 'user', content: 'מה זה?', file: { kind: 'image', bytes } }] }));
+    await sendChat(request(fetch, { webSearch: true, messages: [{ role: 'user', content: 'מה זה?', files: [{ kind: 'image', bytes, number: 1 }] }] }));
     const sent = calls[0].init.body as string;
     expect(JSON.parse(sent).messages[1]).toEqual({ role: 'user', content: 'מה זה?' });
     expect(sent).not.toContain('base64');

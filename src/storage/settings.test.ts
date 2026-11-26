@@ -13,6 +13,7 @@ import {
   isUncensored,
   missingFor,
   modelFor,
+  pictureLimitFor,
   sanitizeSettings,
   saveApiKey,
   saveSettings,
@@ -222,6 +223,19 @@ describe('the model for files', () => {
     saveSettings({ ...SET_UP, fileModel: ' vision-model ' }, storage);
     expect(loadSettings(storage).fileModel).toBe('vision-model');
     expect(sanitizeSettings({ fileModel: 'x'.repeat(MAX_MODEL_CHARS + 50) }).fileModel).toHaveLength(MAX_MODEL_CHARS);
+  });
+
+  it('keeps how many pictures it reads only together with it, as a whole number', () => {
+    expect(sanitizeSettings({ ...SET_UP, fileModel: 'reader', fileModelImages: 10 }).fileModelImages).toBe(10);
+    expect(sanitizeSettings({ ...SET_UP, fileModelImages: 10 })).not.toHaveProperty('fileModelImages');
+    for (const odd of [0, -2, 2.5, '10', null]) expect(sanitizeSettings({ ...SET_UP, fileModel: 'reader', fileModelImages: odd })).not.toHaveProperty('fileModelImages');
+    expect(sanitizeSettings({ ...SET_UP, fileModel: 'reader', fileModelImages: 1e9 }).fileModelImages).toBe(100);
+  });
+
+  it('lets her attach as many pictures as the model reads, at most 5, and 1 when that is not known', () => {
+    expect(pictureLimitFor({ ...SET_UP, fileModel: 'reader' })).toBe(1);
+    expect(pictureLimitFor({ ...SET_UP, fileModel: 'reader', fileModelImages: 3 })).toBe(3);
+    expect(pictureLimitFor({ ...SET_UP, fileModel: 'reader', fileModelImages: 20 })).toBe(5);
   });
 });
 

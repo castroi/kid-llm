@@ -33,6 +33,12 @@ export interface ModelInfo {
   webSearch: boolean;
   /** Can read pictures: what a model for attached files needs. */
   vision: boolean;
+  /**
+   * The most pictures it reads in one message: the provider's `maxImages` when it says the
+   * model takes more than one (`supportsMultipleImages`), otherwise 1. Saved with the choice
+   * of the model for files.
+   */
+  maxImages: number;
   /** Absent from the provider's answer for some models (and for image models, which are priced per picture). */
   price: PriceRange | null;
 }
@@ -45,6 +51,16 @@ export const MAX_MODELS = 1_000;
 /** As long as a model name in the settings may be (src/storage/settings.ts). */
 export const MAX_MODEL_ID_CHARS = 200;
 export const MAX_MODEL_NAME_CHARS = 80;
+
+/** More pictures than this in one message are never asked for, whatever a model's entry says. */
+export const MAX_LISTED_IMAGES = 100;
+
+/** The most pictures a model reads in one message, from its capabilities: 1 unless the provider says more. */
+function maxImagesOf(capabilities: Record<string, unknown>): number {
+  const max = capabilities.maxImages;
+  if (capabilities.supportsMultipleImages !== true || typeof max !== 'number' || !Number.isInteger(max) || max < 1) return 1;
+  return Math.min(max, MAX_LISTED_IMAGES);
+}
 
 /** Printable ASCII with no spaces: what a model's name in a call looks like. */
 const MODEL_ID = /^[\x21-\x7e]+$/;
@@ -117,6 +133,7 @@ export function sanitizeModels(raw: unknown, kind: ModelKind): ModelInfo[] {
       e2ee: capabilities.supportsE2EE === true,
       webSearch: capabilities.supportsWebSearch === true,
       vision: capabilities.supportsVision === true,
+      maxImages: maxImagesOf(capabilities),
       price: kind === 'text' ? priceOf(spec.pricing) : null,
     });
   }

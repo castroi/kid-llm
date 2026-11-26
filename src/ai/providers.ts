@@ -1,6 +1,6 @@
 import { AI_PROVIDERS, type AiProviderId } from './catalog';
 import { attestationNonce, decryptPiece, encryptFor, looksEncrypted, modelKeyFrom, newClientKeys, quoteBytes, quoteIsNotDebug, quoteNamesKey, wipe } from './e2ee';
-import { dataUrl, SENT_FILE_NAMES, type ChatFile } from './files';
+import { dataUrl, sentFileName, type SentFile } from './files';
 import { sanitizeModels, type ModelInfo, type ModelKind } from './models';
 import { sanitizeSources, type Source } from './sources';
 import { LineTooLongError, sseData } from './sse';
@@ -52,8 +52,8 @@ export type FetchLike = (url: string, init: RequestInit) => Promise<Response>;
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
-  /** A picture or a document she attached to this message (src/ai/files.ts). Only on a message of hers. */
-  file?: ChatFile;
+  /** The pictures and documents she attached to this message, numbered (src/ai/files.ts). Only on a message of hers. */
+  files?: SentFile[];
 }
 
 export interface ChatCall {
@@ -294,17 +294,24 @@ async function readChatStream(response: Response, { apiKey, signal, webSearch, o
 }
 
 /**
- * One turn as Venice takes it. A message with a file is sent in parts: her text first, then
- * the file inside the request itself as a `data:` address. A picture goes to a vision model
- * as it is; Venice turns a document into text before the model sees it.
+ * One turn as Venice takes it. A message with files is sent in parts: her text first, then
+ * each file inside the request itself as a `data:` address, by its number. A picture goes to a
+ * vision model as it is, after a line with its number ("Picture 2:"), since a picture has no
+ * name of its own in the request; a document goes under a made-up name with its number
+ * (`file-3.pdf`), and Venice turns it into text before the model sees it.
+ * Docs: https://docs.venice.ai/guides/features/file-inputs (one `file` block per file, the text first)
  */
-function veniceMessage({ role, content, file }: ChatMessage): unknown {
-  if (!file || role !== 'user') return { role, content };
-  const part =
+function veniceMessage({ role, content, files }: ChatMessage): unknown {
+  if (!files || files.length === 0 || role !== 'user') return { role, content };
+  const parts = files.flatMap((file): unknown[] =>
     file.kind === 'image'
-      ? { type: 'image_url', image_url: { url: dataUrl(file) } }
-      : { type: 'file', file: { file_data: dataUrl(file), filename: SENT_FILE_NAMES[file.kind] } };
-  return { role, content: [{ type: 'text', text: content }, part] };
+      ? [
+          { type: 'text', text: `Picture ${file.number}:` },
+          { type: 'image_url', image_url: { url: dataUrl(file) } },
+        ]
+      : [{ type: 'file', file: { file_data: dataUrl(file), filename: sentFileName(file.kind, file.number) } }],
+  );
+  return { role, content: [{ type: 'text', text: content }, ...parts] };
 }
 
 /** An attestation is one JSON answer with a TDX quote and maybe GPU evidence; more than this isn't downloaded. */
@@ -386,7 +393,7 @@ export function encryptedRequestProblem(headers: Record<string, string>, message
  */
 async function streamChatE2ee(chat: ChatCall): Promise<ChatResult> {
   const { model, systemPrompt, messages, apiKey, signal, fetch } = chat;
-  if (chat.webSearch || messages.some((message) => message.file !== undefined)) {
+  if (chat.webSearch || messages.some((message) => (message.files ?? []).length > 0)) {
     // send.ts never asks for this; a file or a search would need the plain text outside the enclave.
     throw new AiError('bad-request', 'web search and files are not sent end-to-end encrypted');
   }

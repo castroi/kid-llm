@@ -344,8 +344,8 @@ describe('when E2EE is not used', () => {
 
   it('a call that carries a file goes as an ordinary call: Venice takes no files with E2EE', async () => {
     const venice = fakeVenice({ answer: [{ plain: 'תמונה יפה' }] });
-    const file = { kind: 'image' as const, bytes: new Uint8Array([0xff, 0xd8, 0xff]).buffer };
-    await sendChat(request(venice.fetch, { messages: [{ role: 'user', content: 'מה בתמונה?', file }] }));
+    const file = { kind: 'image' as const, bytes: new Uint8Array([0xff, 0xd8, 0xff]).buffer, number: 1 };
+    await sendChat(request(venice.fetch, { messages: [{ role: 'user', content: 'מה בתמונה?', files: [file] }] }));
     expect(venice.sent.map((call) => call.url)).toEqual([CHAT]);
   });
 
@@ -354,8 +354,8 @@ describe('when E2EE is not used', () => {
     const base = { model: MODEL, systemPrompt: '', apiKey: KEY, signal: new AbortController().signal, fetch: venice.fetch, onDelta: () => undefined, onAlive: () => undefined, e2ee: true };
     const search = await failureOf(ADAPTERS.venice.streamChat({ ...base, webSearch: true, messages: [{ role: 'user', content: 'x' }] }));
     expect(search.reason).toBe('bad-request');
-    const file = { kind: 'pdf' as const, bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer };
-    const withFile = await failureOf(ADAPTERS.venice.streamChat({ ...base, webSearch: false, messages: [{ role: 'user', content: 'x', file }] }));
+    const file = { kind: 'pdf' as const, bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer, number: 1 };
+    const withFile = await failureOf(ADAPTERS.venice.streamChat({ ...base, webSearch: false, messages: [{ role: 'user', content: 'x', files: [file] }] }));
     expect(withFile.reason).toBe('bad-request');
     expect(venice.sent).toHaveLength(0);
   });

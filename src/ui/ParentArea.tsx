@@ -317,6 +317,11 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
     const chosen = [...Object.values(draft.models), draft.fileModel ?? ''].map((model) => model.trim());
     const marks = [...new Set(chosen.filter(uncensored))];
     const encrypted = [...new Set(chosen.filter(e2ee))];
+    // How many pictures the model for files reads is saved with it, from the provider's list; for
+    // a model the list doesn't know, the number saved with it before, if it is the same model.
+    const fileModel = (draft.fileModel ?? '').trim();
+    const before = parent.loadSettings();
+    const fileModelImages = fileModel === '' ? undefined : (listed(fileModel)?.maxImages ?? (before.fileModel === fileModel ? before.fileModelImages : undefined));
     const savedSettings = parent.saveSettings({
       ...draft,
       // Nothing written for a parent is saved as no field at all.
@@ -324,6 +329,7 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
       dailyLimit: limit,
       uncensored: marks.length > 0 ? marks : undefined,
       e2ee: encrypted.length > 0 ? encrypted : undefined,
+      fileModelImages,
     });
     const savedKey = keyText.trim() ? parent.saveApiKey(provider, keyText) : true;
     if (savedKey) setKeyText('');
@@ -478,10 +484,10 @@ function SettingsForm({ parent, onChatsDeleted, onLocked }: { parent: ParentServ
             unchecked={unchecked(draft.fileModel)}
           >
             <p className="hint">
-              ריק = היא לא יכולה לצרף קבצים. עם שם מודל, במצבים "שיחה" ו"חשבון" היא יכולה לצרף להודעה תמונה, PDF או קובץ Word. הקובץ נשלח לספק עם ההודעה, ושוב עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קובץ אחר; כל שליחה כזאת עולה כסף. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב. צריך מודל שיודע לקרוא תמונות (vision).
+              ריק = היא לא יכולה לצרף קבצים. עם שם מודל, במצבים "שיחה" ו"חשבון" היא יכולה לצרף להודעה כמה קבצים: עד 5 מסמכים (PDF או Word), ותמונות כמה שהמודל קורא בהודעה אחת, עד 5 (תמונה אחת כשאין רשימת מודלים לבדוק בה). הקבצים נשלחים לספק עם ההודעה, ושוב כולם עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קבצים אחרים; כל שליחה כזאת עולה כסף, וכל קובץ מוסיף למחיר. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב. צריך מודל שיודע לקרוא תמונות (vision).
             </p>
             <p className="hint">
-              תמונה נשלחת מוקטנת ובלי הנתונים הנסתרים שלה (מיקום, תאריך, סוג הטלפון), אבל מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת. מסמך נשלח כמו שהוא, עם כל מה שכתוב בו וגם מה שלא רואים בו: שם מי שכתב אותו, הערות, שינויים שנמחקו ותמונות שבתוכו עם הנתונים הנסתרים שלהן. הקבצים נשמרים עם השיחה רק באייפון הזה.
+              תמונה נשלחת מוקטנת ובלי הנתונים הנסתרים שלה (מיקום, תאריך, סוג הטלפון), אבל מה שרואים בה נשלח כמו שהוא: פנים, שם על דף עבודה, כתובת. מסמך נשלח כמו שהוא, עם כל מה שכתוב בו וגם מה שלא רואים בו: שם מי שכתב אותו, הערות, שינויים שנמחקו ותמונות שבתוכו עם הנתונים הנסתרים שלהן. השמות שלה לקבצים לא נשלחים: הספק מקבל רק מספר לכל קובץ. הקבצים ושמותיהם נשמרים עם השיחה רק באייפון הזה, וגם בגיבוי.
             </p>
           </ModelField>
           <p className="hint">שם המודל כפי שהוא מופיע אצל הספק. הילדה רואה רק את שם המצב. כדאי לבחור רק מודלים עם סינון תוכן.</p>
