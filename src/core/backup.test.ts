@@ -99,6 +99,37 @@ describe('a backup file', () => {
     expect(records[1]).toEqual(chat('c2', 9));
   });
 
+  it('gives back what is left of trimmed files: a small copy of a picture, and a document with no bytes', async () => {
+    const trimmed: Chat = {
+      ...chat('c1', 100),
+      messages: [
+        {
+          id: 'q',
+          role: 'user',
+          text: 'מה כתוב?',
+          at: 100,
+          mode: 'chat',
+          attachments: [
+            { kind: 'pdf', bytes: new ArrayBuffer(0), name: '', trimmed: true },
+            { kind: 'image', bytes: JPEG.slice().buffer, name: '', trimmed: true },
+          ],
+        },
+      ],
+    };
+    const { records, whole } = await readAll(backupOf(trimmed, chat('c2', 9)));
+    expect(whole).toBe(true);
+    expect(records).toEqual([trimmed, chat('c2', 9)]);
+  });
+
+  it('stops at a file of no bytes that is not a trimmed document', async () => {
+    for (const holder of [{ kind: 'pdf', bytes: 0 }, { kind: 'image', bytes: 0, trimmed: true }]) {
+      const crafted = { id: 'c1', createdAt: 5, messages: [{ id: 'q', role: 'user', text: 'דף', at: 1, mode: 'chat', attachments: [holder] }] };
+      const { records, whole } = await readAll(fileOf(backupHead(), ...encodeChat(chat('c0', 1)), record(JSON.stringify(crafted))));
+      expect(whole).toBe(false);
+      expect(records).toEqual([chat('c0', 1)]);
+    }
+  });
+
   it('stops at a message that claims more files than a message can hold', async () => {
     const many = Array.from({ length: 11 }, () => ({ kind: 'pdf', bytes: PDF.byteLength }));
     const crafted = { id: 'c1', createdAt: 5, messages: [{ id: 'q', role: 'user', text: 'דף', at: 1, mode: 'chat', attachments: many }] };

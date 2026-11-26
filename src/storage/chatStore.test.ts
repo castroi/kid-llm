@@ -118,6 +118,19 @@ describe('chat store', () => {
     expect(await store.get('c1')).toEqual({ ...longer, title: 'שם חדש' });
   });
 
+  it('changes a chat as it is at that moment, in one step, and leaves it when nothing is to change', async () => {
+    const store = await openChatStore(new IDBFactory());
+    await store.save(chat('c1', 100));
+    const longer = withMessage(chat('c1', 100), { id: 'c1-2', role: 'assistant', text: 'תשובה', at: 200, mode: 'chat' });
+    // A save asked for together with an edit: the edit sees the chat with the new message, and keeps it.
+    const [, edited] = await Promise.all([store.update(longer), store.edit('c1', (current) => ({ ...current, title: `${current.messages.length} הודעות` }))]);
+    expect(edited).toBe(true);
+    expect(await store.get('c1')).toEqual({ ...longer, title: '2 הודעות' });
+    expect(await store.edit('c1', () => null)).toBe(false);
+    expect(await store.edit('gone', (current) => current)).toBe(false);
+    expect(await store.get('gone')).toBeUndefined();
+  });
+
   it('keeps a picture with its chat, byte for byte', async () => {
     const factory = new IDBFactory();
     const store = await openChatStore(factory);

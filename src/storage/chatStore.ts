@@ -29,6 +29,12 @@ export interface ChatStore {
    * that lands just before or after can't be lost. Says whether the chat was there.
    */
   rename(id: string, title: string): Promise<boolean>;
+  /**
+   * Reads the chat and writes what `change` makes of it, in one step, so no other save can land
+   * in between: `change` sees the chat as it is now and gives it back changed, or null to leave
+   * it as it is. Says whether it was written.
+   */
+  edit(id: string, change: (chat: Chat) => Chat | null): Promise<boolean>;
   /** Deletes every chat, hers and a parent's own ("מחיקת כל השיחות" in the parent area). There is no deleting one chat: she can't, by design. */
   clear(): Promise<void>;
   close(): void;
@@ -169,6 +175,22 @@ export async function openChatStore(factory: IDBFactory = indexedDB, timeoutMs: 
         };
       });
       return found;
+    },
+    async edit(id, change) {
+      let written = false;
+      // Read and written in one transaction; `change` runs inside it and must not wait for anything.
+      await write((store) => {
+        const existing = store.get(id);
+        existing.onsuccess = () => {
+          const chat = sanitizeChat(existing.result);
+          const changed = chat ? change(chat) : null;
+          if (changed) {
+            store.put(changed);
+            written = true;
+          }
+        };
+      });
+      return written;
     },
     clear: () => write((store) => store.clear()),
     close: () => db.close(),

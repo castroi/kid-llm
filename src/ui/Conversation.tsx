@@ -126,6 +126,12 @@ function Answer({ message, writing, last, onRetry, copyText, links }: { message:
   );
 }
 
+/** How a picture she attached is named for a screen reader: with its number, and whether only a small copy is left. */
+const pictureAlt = (attachment: Attachment, number: number) => `תמונה ${number} שצירפתי${attachment.trimmed ? ' (עותק קטן)' : ''}`;
+
+/** What a document is called once only a note of it is left: its kind. */
+const DOCUMENT_KINDS: Record<Exclude<Attachment['kind'], 'image'>, string> = { pdf: 'PDF', docx: 'Word' };
+
 /**
  * A picture she attached, over the whole screen, so she can see it better. Closes with its
  * button, a tap beside it, or Escape; focus goes back to where it was.
@@ -149,7 +155,9 @@ function PictureViewer({ attachment, number, onClose }: { attachment: Attachment
         <button ref={close} type="button" className="icon-button viewer-close" aria-label="סגירת התמונה" onClick={onClose}>
           <CloseIcon />
         </button>
-        <BlobImage bytes={attachment.bytes} type="image/jpeg" className="viewer-picture" alt={`תמונה ${number} שצירפתי`} />
+        <BlobImage bytes={attachment.bytes} type="image/jpeg" className="viewer-picture" alt={pictureAlt(attachment, number)} />
+        {/* A small copy is blurry when made large: said so, so it isn't taken for a fault. */}
+        {attachment.trimmed && <p className="viewer-note">נשמר רק עותק קטן של התמונה</p>}
       </div>
     </div>
   );
@@ -171,11 +179,16 @@ function Attached({ attachments }: { attachments: readonly Attachment[] }) {
         <ul className={pictures.length > 1 ? 'attached-pictures grid' : 'attached-pictures'}>
           {pictures.map(({ attachment, number }) => (
             <li key={number} className="attached-picture-item">
-              <button type="button" className="attached-picture-button" aria-label={`${fileLabel(attachment, number)}: הגדלה`} onClick={() => setOpen(number)}>
-                <BlobImage bytes={attachment.bytes} type="image/jpeg" className="attached-picture" alt={`תמונה ${number} שצירפתי`} />
+              <button type="button" className="attached-picture-button" aria-label={`${fileLabel(attachment, number)}${attachment.trimmed ? ' (עותק קטן)' : ''}: הגדלה`} onClick={() => setOpen(number)}>
+                <BlobImage bytes={attachment.bytes} type="image/jpeg" className="attached-picture" alt={pictureAlt(attachment, number)} />
                 {attachments.length > 1 && (
                   <span className="attachment-number" aria-hidden="true">
                     {number}
+                  </span>
+                )}
+                {attachment.trimmed && (
+                  <span className="attachment-small" aria-hidden="true">
+                    עותק קטן
                   </span>
                 )}
               </button>
@@ -183,18 +196,34 @@ function Attached({ attachments }: { attachments: readonly Attachment[] }) {
           ))}
         </ul>
       )}
-      {documents.map(({ attachment, number }) => (
-        <span key={number} className="attached-file">
-          {attachments.length > 1 && (
-            <span className="attachment-number" aria-hidden="true">
-              {number}
+      {documents.map(({ attachment, number }) =>
+        attachment.kind !== 'image' && attachment.trimmed ? (
+          // Only its kind is left: the file and her name for it went after two weeks.
+          <span key={number} className="attached-file trimmed">
+            {attachments.length > 1 && (
+              <span className="attachment-number" aria-hidden="true">
+                {number}
+              </span>
+            )}
+            <FileIcon />
+            <span className="visually-hidden">קובץ {number}, </span>
+            <span>
+              <bdi dir="ltr">{DOCUMENT_KINDS[attachment.kind]}</bdi> · הקובץ נמחק אחרי שבועיים
             </span>
-          )}
-          <FileIcon />
-          <span className="visually-hidden">קובץ {number}: </span>
-          <FileName attachment={attachment} />
-        </span>
-      ))}
+          </span>
+        ) : (
+          <span key={number} className="attached-file">
+            {attachments.length > 1 && (
+              <span className="attachment-number" aria-hidden="true">
+                {number}
+              </span>
+            )}
+            <FileIcon />
+            <span className="visually-hidden">קובץ {number}: </span>
+            <FileName attachment={attachment} />
+          </span>
+        ),
+      )}
       {shown && <PictureViewer attachment={shown.attachment} number={shown.number} onClose={() => setOpen(null)} />}
     </>
   );

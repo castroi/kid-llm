@@ -8,10 +8,12 @@ import type { UpdateServices } from './app/useUpdateCheck';
 import { prepareAttachment, type PickedFile } from './core/attachment';
 import { fetchDeployedCommit } from './core/update';
 import { APP_COMMIT, APP_VERSION } from './core/version';
+import { THUMBNAIL_QUALITY, THUMBNAIL_SIDE } from './core/trim';
 import { exportChats, handOver, importChats } from './storage/backup';
 import { openChatStore, requestPersistence, type ChatStore } from './storage/chatStore';
 import { checkPin, hasPin, lockedFor, setPin } from './storage/pin';
 import { forgetSetup, hasSetup, loadApiKey, loadSettings, saveApiKey, saveSettings } from './storage/settings';
+import { trimOldFiles } from './storage/trimFiles';
 import { countMessage, resetUsage, sentToday } from './storage/usage';
 import './styles.css';
 
@@ -23,7 +25,7 @@ const MAX_PICTURE_PIXELS = 50_000_000;
 /** Opening and redrawing a photo takes a moment; after this long it is given up on. */
 const REDRAW_TIMEOUT_MS = 20_000;
 
-async function redraw(address: string, maxSide: number): Promise<ArrayBuffer> {
+async function redraw(address: string, maxSide: number, quality: number): Promise<ArrayBuffer> {
   const picture = new Image();
   const opened = new Promise<void>((resolve, reject) => {
     picture.onload = () => resolve();
@@ -45,7 +47,7 @@ async function redraw(address: string, maxSide: number): Promise<ArrayBuffer> {
   pen.fillStyle = 'white';
   pen.fillRect(0, 0, canvas.width, canvas.height);
   pen.drawImage(picture, 0, 0, canvas.width, canvas.height);
-  const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
   // iOS keeps a canvas's memory until it is made empty; several photos in a row could use it up.
   canvas.width = 0;
   canvas.height = 0;
@@ -60,14 +62,14 @@ async function redraw(address: string, maxSide: number): Promise<ArrayBuffer> {
  * taken, the phone's model). Rejects when the browser can't open the picture, when it is
  * far too large to draw, or when it takes too long.
  */
-async function encodeImage(file: PickedFile, maxSide: number): Promise<ArrayBuffer> {
+async function encodeImage(file: PickedFile, maxSide: number, quality = 0.85): Promise<ArrayBuffer> {
   const address = URL.createObjectURL(file as Blob);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const tooSlow = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('the picture took too long')), REDRAW_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([redraw(address, maxSide), tooSlow]);
+    return await Promise.race([redraw(address, maxSide, quality), tooSlow]);
   } finally {
     clearTimeout(timer);
     URL.revokeObjectURL(address);
@@ -88,6 +90,13 @@ function browserServices(store: ChatStore | null): Services {
     now: () => Date.now(),
     newId: () => crypto.randomUUID(),
     copyText: (text) => navigator.clipboard.writeText(text),
+    // The small copy of an old picture is drawn the same way as any picture she attaches: only what is seen.
+    ...(store
+      ? {
+          trimOldFiles: (skipChatId: string) =>
+            trimOldFiles({ store, now: () => Date.now(), thumbnail: (bytes) => encodeImage(new Blob([bytes], { type: 'image/jpeg' }), THUMBNAIL_SIDE, THUMBNAIL_QUALITY) }, skipChatId),
+        }
+      : {}),
   };
 }
 

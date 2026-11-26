@@ -16,6 +16,12 @@ export interface Attachment extends ChatFile {
    * not sent again, so one refused file doesn't make every later message of the chat fail.
    */
   refused?: true;
+  /**
+   * Kept whole for `KEEP_FILES_DAYS` only (src/core/trim.ts): after that a picture is kept as a
+   * small copy and a document as a note of its kind, with no bytes; her name for it goes too.
+   * Never sent to a model again.
+   */
+  trimmed?: true;
 }
 
 /** A picture as it is sent and kept, after the app made it smaller. */
@@ -105,9 +111,16 @@ export function pictureName(name: unknown): string {
 /** A stored attachment as it may be used: a known kind whose bytes start like that kind and have a sane size. Otherwise null. */
 export function sanitizeAttachment(raw: unknown): Attachment | null {
   if (!raw || typeof raw !== 'object') return null;
-  const { kind, bytes, name, refused } = raw as Record<string, unknown>;
+  const { kind, bytes, name, refused, trimmed } = raw as Record<string, unknown>;
   if (typeof kind !== 'string' || !(FILE_KINDS as readonly string[]).includes(kind)) return null;
   const known = kind as FileKind;
+  // A trimmed file has lost her name for it; a trimmed document has lost its bytes too.
+  if (trimmed === true) {
+    const marks = { trimmed: true as const, ...(refused === true ? { refused: true as const } : {}) };
+    if (known !== 'image') return bytes instanceof ArrayBuffer && bytes.byteLength === 0 ? { kind: known, bytes, name: '', ...marks } : null;
+    if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0 || bytes.byteLength > MAX_PICTURE_BYTES || !startsLike('image', bytes)) return null;
+    return { kind: known, bytes, name: '', ...marks };
+  }
   if (!(bytes instanceof ArrayBuffer) || bytes.byteLength === 0 || bytes.byteLength > bytesFor(known) || !startsLike(known, bytes)) return null;
   return { kind: known, bytes, name: known === 'image' ? pictureName(name) : displayName(name), ...(refused === true ? { refused: true as const } : {}) };
 }
