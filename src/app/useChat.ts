@@ -32,6 +32,11 @@ export interface Services {
   now: () => number;
   newId: () => string;
   copyText: (text: string) => Promise<void>;
+  /**
+   * Trims the files that are older than two weeks in every chat but the one on the screen
+   * (src/storage/trimFiles.ts). Absent when nothing is kept on this phone.
+   */
+  trimOldFiles?: (skip: (chatId: string) => boolean) => Promise<unknown>;
 }
 
 /**

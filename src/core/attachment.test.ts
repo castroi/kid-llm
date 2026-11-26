@@ -170,6 +170,17 @@ describe('sanitizeAttachment', () => {
     expect(sanitizeAttachment({ kind: 'pdf', bytes: PDF.slice().buffer, name: 'a.pdf', refused: 'yes' })).not.toHaveProperty('refused');
   });
 
+  it('keeps what is left of a trimmed file: a small copy of a picture, or a note of a document with no bytes, never a name', () => {
+    expect(sanitizeAttachment({ kind: 'image', bytes: JPEG.slice().buffer, name: 'הכיתה.jpg', trimmed: true })).toEqual({ kind: 'image', bytes: JPEG.slice().buffer, name: '', trimmed: true });
+    expect(sanitizeAttachment({ kind: 'pdf', bytes: new ArrayBuffer(0), name: 'דף של נועה.pdf', trimmed: true, refused: true })).toEqual({ kind: 'pdf', bytes: new ArrayBuffer(0), name: '', trimmed: true, refused: true });
+    // A trimmed document still holding bytes, or a trimmed picture without a picture's bytes, is not what the app writes.
+    expect(sanitizeAttachment({ kind: 'pdf', bytes: PDF.slice().buffer, trimmed: true })).toBeNull();
+    expect(sanitizeAttachment({ kind: 'image', bytes: new ArrayBuffer(0), trimmed: true })).toBeNull();
+    expect(sanitizeAttachment({ kind: 'image', bytes: PNG.slice().buffer, trimmed: true })).toBeNull();
+    // An empty document that is not marked trimmed is still nothing.
+    expect(sanitizeAttachment({ kind: 'docx', bytes: new ArrayBuffer(0), trimmed: 'yes' })).toBeNull();
+  });
+
   it('drops anything else', () => {
     const bad = [
       null,

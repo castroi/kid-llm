@@ -169,8 +169,10 @@ export async function readBackup(file: BackupSource, onRecord: (chat: Chat | nul
         if (named.length > MAX_FILES_PER_MESSAGE) return false;
         for (const holder of named) {
           if (!holder || typeof holder !== 'object') continue;
-          const wanted = (holder as Record<string, unknown>).bytes;
-          if (typeof wanted !== 'number' || !Number.isInteger(wanted) || wanted < 1 || wanted > MAX_FILE_BYTES) return false;
+          const { bytes: wanted, trimmed, kind } = holder as Record<string, unknown>;
+          // Only a trimmed document has no bytes left.
+          const least = trimmed === true && kind !== 'image' ? 0 : 1;
+          if (typeof wanted !== 'number' || !Number.isInteger(wanted) || wanted < least || wanted > MAX_FILE_BYTES) return false;
           chatBytes += wanted;
           if (chatBytes > MAX_CHAT_FILE_BYTES) return false;
           holders.push(holder as Record<string, unknown>);
@@ -179,7 +181,7 @@ export async function readBackup(file: BackupSource, onRecord: (chat: Chat | nul
     }
     for (const holder of holders) {
       const wanted = holder.bytes as number;
-      const bytes = await read(at, wanted);
+      const bytes = wanted === 0 ? new ArrayBuffer(0) : await read(at, wanted);
       if (!bytes) return false;
       at += wanted;
       holder.bytes = bytes;

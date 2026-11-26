@@ -158,7 +158,8 @@ function filesToSend(attachments: readonly Attachment[], maxPictures: number): N
   const files: NonNullable<ChatMessage['files']> = [];
   let pictures = 0;
   attachments.forEach((attachment, index) => {
-    if (attachment.refused) return;
+    // A file the provider refused, or one only a small copy or a note is left of, doesn't go.
+    if (attachment.refused || attachment.trimmed) return;
     if (attachment.kind === 'image' && ++pictures > maxPictures) return;
     files.push({ kind: attachment.kind, bytes: attachment.bytes, number: index + 1 });
   });

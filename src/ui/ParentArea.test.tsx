@@ -317,6 +317,7 @@ describe('the settings', () => {
     expect(screen.getByText(/היא יכולה לצרף להודעה כמה קבצים: עד 5 מסמכים \(PDF או Word\), ותמונות כמה שהמודל קורא בהודעה אחת, עד 5/)).toBeInTheDocument();
     expect(screen.getByText(/ושוב כולם עם כל הודעה שבאה אחריה באותה שיחה, עד שהיא מצרפת קבצים אחרים; כל שליחה כזאת עולה כסף, וכל קובץ מוסיף למחיר\. כל עוד יש קובץ בשיחה, כל השיחה נשלחת למודל הזה ולא למודל של המצב/)).toBeInTheDocument();
     expect(screen.getByText(/השמות שלה לקבצים לא נשלחים: הספק מקבל רק מספר לכל קובץ/)).toBeInTheDocument();
+    expect(screen.getByText(/אחרי שבועיים נשאר מכל תמונה רק עותק קטן, ומכל מסמך רק הסוג שלו, והשמות נמחקים/)).toBeInTheDocument();
     await userEvent.type(screen.getByLabelText('מודל לתמונות ולקבצים שהיא מצרפת'), 'vision-model');
     await userEvent.click(screen.getByRole('button', { name: 'שמירה' }));
     expect(phone.settings.fileModel).toBe('vision-model');
