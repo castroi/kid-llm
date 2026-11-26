@@ -1,5 +1,6 @@
 import { AI_PROVIDERS, type AiProviderId } from '../ai/catalog';
-import { looksUncensored } from '../ai/models';
+import { looksUncensored, MAX_LISTED_IMAGES } from '../ai/models';
+import { MAX_PICTURES } from '../core/attachment';
 import { MODES, type ModeId } from '../core/modes';
 import { cut } from '../core/text';
 
@@ -20,6 +21,12 @@ export interface Settings {
    * read pictures. Absent = not set up: she gets no attach button and no file leaves the phone.
    */
   fileModel?: string;
+  /**
+   * How many pictures the model for files reads in one message, as the provider's list said
+   * when the parent chose it (`maxImages`). Absent = not known, which counts as 1. Kept only
+   * together with `fileModel`. Written by the parent area from the provider's list.
+   */
+  fileModelImages?: number;
   /**
    * What the parent wrote for her chats: sent after the built-in child instructions, and only
    * while the app is used by a child. May describe her; a backup that includes it says so.
@@ -93,12 +100,15 @@ export function sanitizeSettings(raw: unknown): Settings {
   const uncensored = [...chosen].filter((model) => marked.includes(model));
   const encrypting = marks(value.e2ee);
   const e2ee = [...chosen].filter((model) => encrypting.includes(model));
+  const images = value.fileModelImages;
+  const fileModelImages = fileModel && typeof images === 'number' && Number.isInteger(images) && images >= 1 ? Math.min(images, MAX_LISTED_IMAGES) : undefined;
   // Read from its own field only: what was written for her is never taken for a parent's, or the other way round.
   const parentSystemPrompt = text(value.parentSystemPrompt, MAX_SYSTEM_PROMPT_CHARS);
   return {
     provider: typeof value.provider === 'string' && Object.hasOwn(AI_PROVIDERS, value.provider) ? (value.provider as AiProviderId) : DEFAULT_SETTINGS.provider,
     models,
     ...(fileModel ? { fileModel } : {}),
+    ...(fileModelImages !== undefined ? { fileModelImages } : {}),
     systemPrompt: text(value.systemPrompt, MAX_SYSTEM_PROMPT_CHARS),
     ...(parentSystemPrompt.trim() !== '' ? { parentSystemPrompt } : {}),
     childName: text(value.childName, MAX_NAME_CHARS).trim(),
@@ -181,6 +191,14 @@ export function modelFor(mode: ModeId, settings: Settings): string {
 /** The model her attached files go to, under the same rule as `modelFor`; empty = no attaching. */
 export function fileModelFor(settings: Settings): string {
   return allowed(settings.fileModel ?? '', settings);
+}
+
+/**
+ * The most pictures she can attach to one message: what the model for files reads, as saved
+ * with its choice, and never more than `MAX_PICTURES`. 1 when that is not known.
+ */
+export function pictureLimitFor(settings: Settings): number {
+  return Math.min(MAX_PICTURES, settings.fileModelImages ?? 1);
 }
 
 /** The written instructions of a chat call, as `sendChat` takes them (src/ai/send.ts). */

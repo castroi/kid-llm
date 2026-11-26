@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { plainText } from '../core/answerText';
 import type { GeneratedImage } from '../ai/providers';
 import { siteName, type Source } from '../ai/sources';
@@ -6,7 +6,9 @@ import type { Attachment } from '../core/attachment';
 import type { StoredMessage } from '../core/chat';
 import { modeName } from '../core/modes';
 import { AnswerText } from './AnswerText';
-import { CheckIcon, CopyIcon, FileIcon, RetryIcon } from './icons';
+import { BlobImage } from './BlobImage';
+import { fileLabel, FileName } from './FileName';
+import { CheckIcon, CloseIcon, CopyIcon, FileIcon, RetryIcon } from './icons';
 
 const clock = new Intl.DateTimeFormat('he-IL', { hour: '2-digit', minute: '2-digit' });
 
@@ -39,24 +41,6 @@ function CopyButton({ text, copyText, label }: { text: string; copyText: (text: 
       <span aria-live="polite">{copied ? 'הועתק!' : 'העתקה'}</span>
     </button>
   );
-}
-
-/**
- * A picture kept as bytes on the phone. Its address lives only while it is on the screen:
- * it is made when the picture is put on the screen (before it is painted) and released when
- * the picture leaves it or its bytes change.
- */
-function BlobImage({ bytes, type, className, alt }: { bytes: ArrayBuffer; type: string; className: string; alt: string }) {
-  const show = useCallback(
-    (img: HTMLImageElement | null) => {
-      if (!img) return;
-      const address = URL.createObjectURL(new Blob([bytes], { type }));
-      img.src = address;
-      return () => URL.revokeObjectURL(address);
-    },
-    [bytes, type],
-  );
-  return <img ref={show} className={className} alt={alt} />;
 }
 
 /** A picture she asked for. */
@@ -142,14 +126,77 @@ function Answer({ message, writing, last, onRetry, copyText, links }: { message:
   );
 }
 
-/** What she attached to a message: a picture is shown; a document is shown by her name for it. */
-function Attached({ attachment }: { attachment: Attachment }) {
-  if (attachment.kind === 'image') return <BlobImage bytes={attachment.bytes} type="image/jpeg" className="attached-picture" alt="התמונה שצירפתי" />;
+/**
+ * A picture she attached, over the whole screen, so she can see it better. Closes with its
+ * button, a tap beside it, or Escape; focus goes back to where it was.
+ */
+function PictureViewer({ attachment, number, onClose }: { attachment: Attachment; number: number; onClose: () => void }) {
+  const close = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    close.current?.focus();
+    return () => before?.focus();
+  }, []);
   return (
-    <span className="attached-file">
-      <FileIcon />
-      <span dir="auto">{attachment.name || 'קובץ'}</span>
-    </span>
+    <div
+      className="sheet-layer viewer-layer"
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') onClose();
+      }}
+    >
+      <button type="button" className="scrim" aria-label="סגירה" tabIndex={-1} onClick={onClose} />
+      <div className="viewer" role="dialog" aria-modal="true" aria-label={`תמונה ${number} שצירפתי`}>
+        <button ref={close} type="button" className="icon-button viewer-close" aria-label="סגירת התמונה" onClick={onClose}>
+          <CloseIcon />
+        </button>
+        <BlobImage bytes={attachment.bytes} type="image/jpeg" className="viewer-picture" alt={`תמונה ${number} שצירפתי`} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What she attached to a message, numbered from 1 in the order she added the files, as they
+ * were sent: pictures in a grid (a tap shows one over the whole screen), documents by her name for them.
+ */
+function Attached({ attachments }: { attachments: readonly Attachment[] }) {
+  const [open, setOpen] = useState<number | null>(null);
+  const numbered = attachments.map((attachment, index) => ({ attachment, number: index + 1 }));
+  const pictures = numbered.filter(({ attachment }) => attachment.kind === 'image');
+  const documents = numbered.filter(({ attachment }) => attachment.kind !== 'image');
+  const shown = open === null ? undefined : numbered[open - 1];
+  return (
+    <>
+      {pictures.length > 0 && (
+        <ul className={pictures.length > 1 ? 'attached-pictures grid' : 'attached-pictures'}>
+          {pictures.map(({ attachment, number }) => (
+            <li key={number} className="attached-picture-item">
+              <button type="button" className="attached-picture-button" aria-label={`${fileLabel(attachment, number)}: הגדלה`} onClick={() => setOpen(number)}>
+                <BlobImage bytes={attachment.bytes} type="image/jpeg" className="attached-picture" alt={`תמונה ${number} שצירפתי`} />
+                {attachments.length > 1 && (
+                  <span className="attachment-number" aria-hidden="true">
+                    {number}
+                  </span>
+                )}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {documents.map(({ attachment, number }) => (
+        <span key={number} className="attached-file">
+          {attachments.length > 1 && (
+            <span className="attachment-number" aria-hidden="true">
+              {number}
+            </span>
+          )}
+          <FileIcon />
+          <span className="visually-hidden">קובץ {number}: </span>
+          <FileName attachment={attachment} />
+        </span>
+      ))}
+      {shown && <PictureViewer attachment={shown.attachment} number={shown.number} onClose={() => setOpen(null)} />}
+    </>
   );
 }
 
@@ -180,7 +227,7 @@ export function Conversation({ messages, writing, onRetry, copyText, links = fal
         message.role === 'user' ? (
           <div key={message.id} className="mine">
             <div className="bubble" dir="auto">
-              {message.attachment && <Attached attachment={message.attachment} />}
+              {message.attachments && <Attached attachments={message.attachments} />}
               {message.text}
             </div>
             {/* Only her words are copied; a file she attached never goes to the clipboard. */}

@@ -3,7 +3,7 @@ import { IMAGE_TYPES, MAX_IMAGE_BYTES, type ChatMessage, type GeneratedImage, ty
 import { sanitizeSources, type Source } from '../ai/sources';
 import { MODES, type ModeId } from './modes';
 import { cut } from './text';
-import { canAttachIn, sanitizeAttachment, type Attachment } from './attachment';
+import { canAttachIn, MAX_DOCUMENTS, MAX_PICTURES, sanitizeAttachment, withinLimits, type Attachment } from './attachment';
 
 /** One message as it is kept on the phone. */
 export interface StoredMessage {
@@ -16,8 +16,12 @@ export interface StoredMessage {
   mode: ModeId;
   /** The model that wrote this answer, by the name it is called with. Absent on her messages and on answers kept before this was. Shown only, never sent. */
   model?: string;
-  /** A picture or a document she attached to this message of hers. Its bytes are kept with the chat, on the phone only. */
-  attachment?: Attachment;
+  /**
+   * The pictures and documents she attached to this message of hers, in the order she added
+   * them: the screen numbers them from 1 in that order, and so does what is sent. Their bytes
+   * are kept with the chat, on the phone only. Absent = none (never an empty list).
+   */
+  attachments?: Attachment[];
   /**
    * How an answer ended, when it didn't end normally:
    * `stopped` she pressed "עצירה" (the text so far is kept); `failed` the call failed.
@@ -108,11 +112,14 @@ export const MAX_CONTEXT_CHARS = 24_000;
  * conversation is longer than `maxChars`, the oldest messages are dropped; her newest
  * always goes, cut to `maxChars`. Empty when there is nothing of hers to answer.
  *
- * Of the files she attached, only the newest one that is still inside the conversation goes,
- * with the message it was attached to: the provider keeps no file between calls, and
- * resending every old picture with every message would cost far more than it helps.
+ * Of the files she attached, only those of her newest message with files go again, with the
+ * message they were attached to: the provider keeps no file between calls, and resending every
+ * old picture with every message would cost far more than it helps. Each goes with its number
+ * in that message (from 1, as the screen shows it), so "קובץ 2" means the same file to her and
+ * to the model. Files the provider refused don't go again, and pictures past `maxPictures`
+ * (what the model for files reads now) stay on the phone.
  */
-export function toProviderMessages(messages: readonly StoredMessage[], maxChars: number = MAX_CONTEXT_CHARS): ChatMessage[] {
+export function toProviderMessages(messages: readonly StoredMessage[], maxChars: number = MAX_CONTEXT_CHARS, maxPictures: number = MAX_PICTURES): ChatMessage[] {
   // Drawing requests and their pictures are not part of the talk: a picture can't be sent
   // as text, and its request alone would look like a question nobody answered.
   const known = messages.filter((m) => (m.role === 'user' || m.role === 'assistant') && typeof m.text === 'string' && m.mode !== 'draw');
@@ -126,30 +133,56 @@ export function toProviderMessages(messages: readonly StoredMessage[], maxChars:
 
   const kept: ChatMessage[] = [];
   let used = 0;
-  let fileTaken = false;
+  let filesTaken = false;
   for (let i = usable.length - 1; i >= 0; i--) {
-    const { role, attachment } = usable[i];
+    const { role, attachments } = usable[i];
     const content = cut(usable[i].text, maxChars);
     if (kept.length > 0 && used + content.length > maxChars) break;
     used += content.length;
-    // Walking from the newest: the first file met is the newest one, and the only one that may go.
-    // One the provider refused doesn't go again. Her name for the file stays on the phone.
-    const newest = !fileTaken && role === 'user' && attachment !== undefined;
-    if (newest) fileTaken = true;
-    const file = newest && !attachment.refused ? { kind: attachment.kind, bytes: attachment.bytes } : undefined;
-    if (kept[0]?.role === role) kept[0] = { ...kept[0], content: `${content}\n\n${kept[0].content}`, ...(file ? { file } : {}) };
-    else kept.unshift(file ? { role, content, file } : { role, content });
+    // Walking from the newest: the first files met are the newest ones, and the only ones that may go.
+    // Her names for the files stay on the phone.
+    const newest = !filesTaken && role === 'user' && attachments !== undefined && attachments.length > 0;
+    if (newest) filesTaken = true;
+    const files = newest ? filesToSend(attachments, maxPictures) : [];
+    const withFiles = files.length > 0 ? { files } : {};
+    if (kept[0]?.role === role) kept[0] = { ...kept[0], content: `${content}\n\n${kept[0].content}`, ...withFiles };
+    else kept.unshift({ role, content, ...withFiles });
   }
   // A conversation can't open with an answer whose question was dropped.
   while (kept.length > 1 && kept[0].role === 'assistant') kept.shift();
   return kept;
 }
 
-/** Marks her newest file as refused by the provider, so it is not sent again (see `Attachment.refused`). */
-export function withNewestFileRefused(messages: readonly StoredMessage[]): StoredMessage[] {
+/** The files of one message as they are sent: numbered as on the screen, without refused ones or pictures past the limit. */
+function filesToSend(attachments: readonly Attachment[], maxPictures: number): NonNullable<ChatMessage['files']> {
+  const files: NonNullable<ChatMessage['files']> = [];
+  let pictures = 0;
+  attachments.forEach((attachment, index) => {
+    if (attachment.refused) return;
+    if (attachment.kind === 'image' && ++pictures > maxPictures) return;
+    files.push({ kind: attachment.kind, bytes: attachment.bytes, number: index + 1 });
+  });
+  return files;
+}
+
+/** Marks the files of her newest message with files as refused by the provider, so they are not sent again (see `Attachment.refused`). */
+export function withNewestFilesRefused(messages: readonly StoredMessage[]): StoredMessage[] {
   let index = messages.length - 1;
-  while (index >= 0 && !(messages[index].role === 'user' && messages[index].attachment)) index--;
-  return messages.map((message, i) => (i === index && message.attachment ? { ...message, attachment: { ...message.attachment, refused: true as const } } : message));
+  while (index >= 0 && !(messages[index].role === 'user' && messages[index].attachments)) index--;
+  return messages.map((message, i) =>
+    i === index && message.attachments ? { ...message, attachments: message.attachments.map((attachment) => ({ ...attachment, refused: true as const })) } : message,
+  );
+}
+
+/**
+ * Stored files as they may be used: a list (or, from before there could be more than one, a
+ * single file), each checked, as many as one message can hold. Empty when there are none.
+ */
+function sanitizeAttachments(list: unknown, single: unknown): Attachment[] {
+  // Only the start of a list far longer than a message can hold is looked at.
+  const raw = Array.isArray(list) ? list.slice(0, 4 * (MAX_PICTURES + MAX_DOCUMENTS)) : single !== undefined ? [single] : [];
+  const usable = raw.map(sanitizeAttachment).filter((attachment): attachment is Attachment => attachment !== null);
+  return withinLimits(usable, MAX_PICTURES);
 }
 
 /** A stored picture as it may be shown: one of the known picture types, with bytes of a sane size. Otherwise null. */
@@ -181,9 +214,9 @@ export function sanitizeChat(raw: unknown): Chat | null {
     const m = item as Record<string, unknown>;
     if ((m.role !== 'user' && m.role !== 'assistant') || typeof m.id !== 'string' || typeof m.text !== 'string') continue;
     const message: StoredMessage = { id: m.id, role: m.role, text: m.text, at: isTime(m.at) ? m.at : value.createdAt, mode: isMode(m.mode) ? m.mode : mode };
-    // A file is hers only, and only in the modes where she can attach one.
-    const attachment = sanitizeAttachment(m.attachment);
-    if (attachment && m.role === 'user' && canAttachIn(message.mode)) message.attachment = attachment;
+    // Files are hers only, and only in the modes where she can attach them.
+    const attachments = sanitizeAttachments(m.attachments, m.attachment);
+    if (attachments.length > 0 && m.role === 'user' && canAttachIn(message.mode)) message.attachments = attachments;
     if (m.state === 'stopped' || m.state === 'failed') message.state = m.state;
     // Shown on the screen, so checked like anything stored: an answer's only, and only what a model's name looks like.
     if (m.role === 'assistant' && isModelId(m.model)) message.model = m.model;

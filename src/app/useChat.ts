@@ -4,12 +4,12 @@ import { AiError, type AiErrorReason, type ChatResult, type GeneratedImage } fro
 import type { ChatRequest, ImageRequest } from '../ai/send';
 import type { Source } from '../ai/sources';
 import { forgetParsed } from '../core/answerText';
-import { canAttachIn, type Attachment } from '../core/attachment';
-import { MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withNewestFileRefused, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
+import { canAttachIn, withinLimits, type Attachment } from '../core/attachment';
+import { MAX_CONTEXT_CHARS, MAX_MESSAGE_CHARS, newChat, titleFrom, toProviderMessages, withMessage, withNewestFilesRefused, withUpdatedMessage, type Chat, type ChatSummary, type StoredMessage } from '../core/chat';
 import { cut } from '../core/text';
 import { DEFAULT_MODE, isReady, type ModeId } from '../core/modes';
 import type { ChatStore } from '../storage/chatStore';
-import { fileModelFor, instructionsFor, isE2ee, missingFor, modelFor, type Settings } from '../storage/settings';
+import { fileModelFor, instructionsFor, isE2ee, missingFor, modelFor, pictureLimitFor, type Settings } from '../storage/settings';
 
 /** Everything the chat needs from outside, so tests can stand in for the phone and the provider. */
 export interface Services {
@@ -18,8 +18,11 @@ export interface Services {
   loadSettings: () => Settings;
   loadApiKey: (provider: AiProviderId) => string;
   sendChat: (request: ChatRequest) => Promise<ChatResult>;
-  /** Makes a file she picked ready to attach (src/core/attachment.ts). Rejects with an AttachmentError. */
-  prepareAttachment: (file: File) => Promise<Attachment>;
+  /**
+   * Makes a file she picked ready to attach (src/core/attachment.ts); a picture is redrawn
+   * smaller when `smaller` (the message has more than one). Rejects with an AttachmentError.
+   */
+  prepareAttachment: (file: File, smaller: boolean) => Promise<Attachment>;
   /** Makes one picture of what she wrote (drawing mode). */
   generateImage: (request: ImageRequest) => Promise<GeneratedImage>;
   /** How many messages she has sent today, and counting one more (src/storage/usage.ts). */
@@ -57,10 +60,11 @@ export interface ChatController {
   notSaved: boolean;
   setMode: (mode: ModeId) => void;
   /**
-   * Sends her message, with the file she attached if there is one. False when nothing was sent
-   * (empty, not set up, over the limit, an answer is being written, or a file where none can go).
+   * Sends her message, with the files she attached, in their order. False when nothing was sent
+   * (empty, not set up, over the limit, an answer is being written, or files where none can go
+   * or more than one message can carry).
    */
-  send: (text: string, attachment?: Attachment) => boolean;
+  send: (text: string, attachments?: readonly Attachment[]) => boolean;
   /** Her "עצירה": ends the answer; what was written stays. */
   stop: () => void;
   /** Asks again for an answer to her last message, replacing the last answer. */
@@ -162,11 +166,12 @@ export function useChat(services: Services): ChatController {
     async (base: Chat, forMode: ModeId, settings: Settings, apiKey: string, replaced: readonly StoredMessage[], countOnFirstPiece: boolean, mayResume: boolean): Promise<Cut | null> => {
       // What a chat call carries. A search call carries only what she wrote in search mode (and
       // its answers): what she said in other modes of the same chat is not handed to a search engine.
-      const talk = forMode === 'draw' ? [] : toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages);
+      // Pictures go only as many as the model for files reads now (the parent may have picked another since).
+      const talk = forMode === 'draw' ? [] : toProviderMessages(forMode === 'search' ? base.messages.filter((m) => m.mode === 'search') : base.messages, MAX_CONTEXT_CHARS, pictureLimitFor(settings));
       // A call that carries a file goes to the model the parent chose for files. With none
       // chosen (the parent took it away since), the file stays on the phone and only the text goes.
       const fileModel = canAttachIn(forMode) ? fileModelFor(settings) : '';
-      const withFile = fileModel !== '' && talk.some((m) => m.file !== undefined);
+      const withFile = fileModel !== '' && talk.some((m) => (m.files ?? []).length > 0);
       // The model this call goes to; its name is kept with the answer and shown under it.
       const model = withFile ? fileModel : modelFor(forMode, settings);
       const reply: StoredMessage = { id: services.newId(), role: 'assistant', text: '', at: services.now(), mode: forMode, ...(model ? { model } : {}) };
@@ -249,9 +254,9 @@ export function useChat(services: Services): ChatController {
         } else {
           if (text) write('failed');
           else drop();
-          // The provider would not take the request that carried her file (a model that reads no
-          // files, or a file it can't open): the file is not sent again, so the chat isn't stuck on it.
-          if (reason === 'bad-request' && withFile) put({ ...current, messages: withNewestFileRefused(current.messages) });
+          // The provider would not take the request that carried her files (a model that reads no
+          // files, or a file it can't open): they are not sent again, so the chat isn't stuck on them.
+          if (reason === 'bad-request' && withFile) put({ ...current, messages: withNewestFilesRefused(current.messages) });
           // The phone cut the call while the app was off the screen: she gets no error for
           // switching apps; the app asks again by itself. Never after her stop (that is `cancelled`).
           const cutByLeaving = mayResume && (reason === 'network' || reason === 'timeout') && flips.current !== flipsSeen && shown.current.id === current.id;
@@ -320,17 +325,19 @@ export function useChat(services: Services): ChatController {
   );
 
   const send = useCallback(
-    (text: string, attachment?: Attachment): boolean => {
+    (text: string, attachments: readonly Attachment[] = []): boolean => {
       const mine = text.trim();
       if (!mine || busy.current || !isReady(mode)) return false;
       const settings = services.loadSettings();
       const apiKey = services.loadApiKey(settings.provider);
       if (missingFor(mode, settings, apiKey)) return false;
-      // A file goes only in the modes that take one, and only when the parent chose a model for files.
-      if (attachment && (!canAttachIn(mode) || !fileModelFor(settings))) return false;
+      // Files go only in the modes that take them, only when the parent chose a model for files,
+      // and only as many as one message can carry.
+      if (attachments.length > 0 && (!canAttachIn(mode) || !fileModelFor(settings))) return false;
+      if (withinLimits(attachments, pictureLimitFor(settings)).length !== attachments.length) return false;
 
       if (overLimit(settings)) return false;
-      const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode, ...(attachment ? { attachment } : {}) });
+      const base = withMessage(shown.current, { id: services.newId(), role: 'user', text: cut(mine, MAX_MESSAGE_CHARS), at: services.now(), mode, ...(attachments.length > 0 ? { attachments: [...attachments] } : {}) });
       count();
       show(base);
       keep(base, true, settings.parentUse === true);

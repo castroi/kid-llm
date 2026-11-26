@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { canAttachIn } from '../core/attachment';
 import { kidMessage, LIMIT_MESSAGE, NOT_SAVED_MESSAGE, PARENT_USE_MESSAGE, SETUP_MESSAGE, UPDATE_MESSAGE } from '../core/kidMessages';
 import { isReady, MODES, type ModeId } from '../core/modes';
-import { fileModelFor, missingFor, modelFor } from '../storage/settings';
+import { fileModelFor, missingFor, modelFor, pictureLimitFor } from '../storage/settings';
 import { Composer } from '../ui/Composer';
 import { Conversation } from '../ui/Conversation';
 import { HistoryDrawer } from '../ui/HistoryDrawer';
@@ -23,7 +23,15 @@ function readSetup(services: Services) {
   // The model each mode would be answered by now: none for an uncensored model while a child uses the app.
   const models = Object.fromEntries(MODES.map((m) => [m.id, modelFor(m.id, settings)])) as Record<ModeId, string>;
   // She can attach a file only once the parent chose a model for files.
-  return { models, childName: settings.childName, notSetUp: notSetUp as readonly ModeId[], filesReady: apiKey !== '' && fileModelFor(settings) !== '', parentUse: settings.parentUse === true };
+  return {
+    models,
+    childName: settings.childName,
+    notSetUp: notSetUp as readonly ModeId[],
+    filesReady: apiKey !== '' && fileModelFor(settings) !== '',
+    // How many pictures one message can carry: what the model for files reads, at most 5.
+    pictureLimit: pictureLimitFor(settings),
+    parentUse: settings.parentUse === true,
+  };
 }
 
 export function App({ services, parent, updates }: { services: Services; parent: ParentServices; updates?: UpdateServices }) {
@@ -169,6 +177,7 @@ export function App({ services, parent, updates }: { services: Services; parent:
         writing={writing}
         blocked={blocked}
         attach={setup.filesReady && !blocked && canAttachIn(mode) ? services.prepareAttachment : null}
+        pictureLimit={setup.pictureLimit}
         onSend={send}
         onStop={stop}
         onPickMode={() => setPickingMode(true)}

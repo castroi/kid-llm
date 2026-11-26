@@ -15,8 +15,6 @@ import { forgetSetup, hasSetup, loadApiKey, loadSettings, saveApiKey, saveSettin
 import { countMessage, resetUsage, sentToday } from './storage/usage';
 import './styles.css';
 
-/** The longest side of a picture she attaches, in pixels: enough to read a homework sheet, small enough to send. */
-const MAX_PICTURE_SIDE = 1568;
 /** Smaller than this the provider refuses a picture. */
 const MIN_PICTURE_SIDE = 64;
 
@@ -25,7 +23,7 @@ const MAX_PICTURE_PIXELS = 50_000_000;
 /** Opening and redrawing a photo takes a moment; after this long it is given up on. */
 const REDRAW_TIMEOUT_MS = 20_000;
 
-async function redraw(address: string): Promise<ArrayBuffer> {
+async function redraw(address: string, maxSide: number): Promise<ArrayBuffer> {
   const picture = new Image();
   const opened = new Promise<void>((resolve, reject) => {
     picture.onload = () => resolve();
@@ -37,7 +35,7 @@ async function redraw(address: string): Promise<ArrayBuffer> {
   const { naturalWidth, naturalHeight } = picture;
   if (Math.min(naturalWidth, naturalHeight) < MIN_PICTURE_SIDE) throw new Error('picture too small');
   if (naturalWidth * naturalHeight > MAX_PICTURE_PIXELS) throw new Error('picture too large');
-  const scale = Math.min(1, MAX_PICTURE_SIDE / Math.max(naturalWidth, naturalHeight));
+  const scale = Math.min(1, maxSide / Math.max(naturalWidth, naturalHeight));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(naturalWidth * scale);
   canvas.height = Math.round(naturalHeight * scale);
@@ -48,24 +46,28 @@ async function redraw(address: string): Promise<ArrayBuffer> {
   pen.fillRect(0, 0, canvas.width, canvas.height);
   pen.drawImage(picture, 0, 0, canvas.width, canvas.height);
   const jpeg = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.85));
+  // iOS keeps a canvas's memory until it is made empty; several photos in a row could use it up.
+  canvas.width = 0;
+  canvas.height = 0;
   if (!jpeg) throw new Error('no picture');
   return await jpeg.arrayBuffer();
 }
 
 /**
- * Redraws a picture she picked as a JPEG no larger than MAX_PICTURE_SIDE. Only what is seen
+ * Redraws a picture she picked as a JPEG whose longest side is at most `maxSide` (src/core/attachment.ts
+ * says how long: shorter when the message has more than one picture). Only what is seen
  * is drawn, so the new picture has none of the photo's hidden data (where and when it was
  * taken, the phone's model). Rejects when the browser can't open the picture, when it is
  * far too large to draw, or when it takes too long.
  */
-async function encodeImage(file: PickedFile): Promise<ArrayBuffer> {
+async function encodeImage(file: PickedFile, maxSide: number): Promise<ArrayBuffer> {
   const address = URL.createObjectURL(file as Blob);
   let timer: ReturnType<typeof setTimeout> | undefined;
   const tooSlow = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('the picture took too long')), REDRAW_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([redraw(address), tooSlow]);
+    return await Promise.race([redraw(address, maxSide), tooSlow]);
   } finally {
     clearTimeout(timer);
     URL.revokeObjectURL(address);
@@ -79,7 +81,7 @@ function browserServices(store: ChatStore | null): Services {
     loadSettings: () => loadSettings(),
     loadApiKey: (provider) => loadApiKey(provider),
     sendChat,
-    prepareAttachment: (file) => prepareAttachment(file, encodeImage),
+    prepareAttachment: (file, smaller) => prepareAttachment(file, encodeImage, smaller),
     generateImage,
     sentToday: () => sentToday(Date.now()),
     countMessage: () => countMessage(Date.now()),

@@ -4,12 +4,20 @@ import {
   AttachmentError,
   canAttachIn,
   displayName,
+  limitFor,
   MAX_DOCUMENT_BYTES,
+  MAX_DOCUMENTS,
   MAX_FILE_NAME_CHARS,
+  MAX_MESSAGE_FILE_BYTES,
   MAX_PICKED_BYTES,
   MAX_PICTURE_BYTES,
+  PICTURE_SIDE,
+  pictureName,
   prepareAttachment,
   sanitizeAttachment,
+  SMALLER_PICTURE_SIDE,
+  withinLimits,
+  type Attachment,
   type PickedFile,
 } from './attachment';
 
@@ -58,14 +66,30 @@ describe('prepareAttachment', () => {
     expect(new Uint8Array(attachment.bytes)).toEqual(DOCX);
   });
 
-  it('redraws a picture and keeps only the redrawn one, without a name', async () => {
+  it('redraws a picture and keeps only the redrawn one, without a name the phone made up', async () => {
     const encode = asJpeg();
     const file = new File([PNG], 'IMG_0042.png', { type: 'image/png' });
     const attachment = await prepareAttachment(file, encode);
-    expect(encode).toHaveBeenCalledWith(file);
+    expect(encode).toHaveBeenCalledWith(file, PICTURE_SIDE);
     expect(attachment).toEqual({ kind: 'image', bytes: JPEG.slice().buffer, name: '' });
     // Nothing of the file she picked is in what is kept.
     expect(new Uint8Array(attachment.bytes)).not.toEqual(PNG);
+  });
+
+  it("keeps her own name for a picture, and redraws it smaller when it isn't the message's only one", async () => {
+    const encode = asJpeg();
+    const file = new File([PNG], 'הלוח בכיתה.png', { type: 'image/png' });
+    expect((await prepareAttachment(file, encode, true)).name).toBe('הלוח בכיתה.png');
+    expect(encode).toHaveBeenCalledWith(file, SMALLER_PICTURE_SIDE);
+  });
+
+  it('knows a picture by its first bytes when the phone says nothing of its type', async () => {
+    const heic = new Uint8Array([0, 0, 0, 0x18, ...new TextEncoder().encode('ftypheic'), 1]);
+    const webp = new Uint8Array([...new TextEncoder().encode('RIFF'), 1, 2, 3, 4, ...new TextEncoder().encode('WEBP')]);
+    for (const head of [JPEG, PNG, heic, webp, new TextEncoder().encode('GIF89a')]) {
+      expect((await prepareAttachment(new File([head], 'x', { type: '' }), asJpeg())).kind).toBe('image');
+    }
+    expect(await problemOf(prepareAttachment(new File(['<svg/>'], 'x', { type: '' }), never()))).toBe('unsupported');
   });
 
   it('refuses what is not a picture, a PDF or a Word file', async () => {
@@ -135,8 +159,9 @@ describe('sanitizeAttachment', () => {
   it('keeps a file whose bytes are what its kind says', () => {
     expect(sanitizeAttachment({ kind: 'pdf', bytes: PDF.slice().buffer, name: 'דף.pdf', extra: 'x' })).toEqual({ kind: 'pdf', bytes: PDF.slice().buffer, name: 'דף.pdf' });
     expect(sanitizeAttachment({ kind: 'docx', bytes: ZIP.slice().buffer })).toEqual({ kind: 'docx', bytes: ZIP.slice().buffer, name: '' });
-    // A picture has no name, whatever was stored.
+    // A picture keeps her name for it, not one the phone made up.
     expect(sanitizeAttachment({ kind: 'image', bytes: JPEG.slice().buffer, name: 'IMG_0042.jpg' })).toEqual({ kind: 'image', bytes: JPEG.slice().buffer, name: '' });
+    expect(sanitizeAttachment({ kind: 'image', bytes: JPEG.slice().buffer, name: 'הכיתה\u202E.jpg' })?.name).toBe('הכיתה.jpg');
     // A file the provider refused stays marked, so it is not sent again after the app is reopened.
     expect(sanitizeAttachment({ kind: 'pdf', bytes: PDF.slice().buffer, name: 'a.pdf', refused: true })?.refused).toBe(true);
     expect(sanitizeAttachment({ kind: 'pdf', bytes: PDF.slice().buffer, name: 'a.pdf', refused: 'yes' })).not.toHaveProperty('refused');
@@ -158,6 +183,46 @@ describe('sanitizeAttachment', () => {
     const tooBig = new Uint8Array(MAX_DOCUMENT_BYTES + 1);
     tooBig.set(PDF);
     expect(sanitizeAttachment({ kind: 'pdf', bytes: tooBig.buffer })).toBeNull();
+  });
+});
+
+describe('pictureName', () => {
+  it('drops the names a phone makes up for a photo, and keeps hers', () => {
+    for (const made of ['image.jpg', 'image.jpeg', 'IMG_1234.HEIC', 'IMG_E1234.jpg', 'IMG_0042_home.png', 'img-0042.png', 'Photo 3.png', 'photo_2024.jpg', '1700000000.jpg', '3F2504E0-4F89-11D3-9A0C-0305E82C3301.jpeg', 'image']) {
+      expect(pictureName(made)).toBe('');
+    }
+    expect(pictureName('הלוח בכיתה.jpg')).toBe('הלוח בכיתה.jpg');
+    expect(pictureName('homework page 2.png')).toBe('homework page 2.png');
+    expect(pictureName(undefined)).toBe('');
+  });
+});
+
+describe('the limits of one message', () => {
+  const doc = (size = 10): Attachment => ({ kind: 'pdf', bytes: new ArrayBuffer(size), name: 'a.pdf' });
+  const pic = (size = 10): Attachment => ({ kind: 'image', bytes: new ArrayBuffer(size), name: '' });
+
+  it('takes pictures up to the limit it is given, and documents up to 5', () => {
+    expect(limitFor([pic(), pic()], pic(), 3)).toBeNull();
+    expect(limitFor([pic(), pic(), pic()], pic(), 3)).toBe('pictures');
+    expect(limitFor([], pic(), 1)).toBeNull();
+    expect(limitFor([pic()], pic(), 1)).toBe('pictures');
+    // Pictures and documents are counted apart.
+    expect(limitFor([pic()], doc(), 1)).toBeNull();
+    const docs = Array.from({ length: MAX_DOCUMENTS }, () => doc());
+    expect(limitFor(docs, doc(), 5)).toBe('documents');
+    expect(limitFor(docs, pic(), 5)).toBeNull();
+  });
+
+  it('takes no more bytes than one message may carry, all its files together', () => {
+    const half = MAX_MESSAGE_FILE_BYTES / 2;
+    expect(limitFor([doc(half)], doc(half), 5)).toBeNull();
+    expect(limitFor([doc(half)], doc(half + 1), 5)).toBe('size');
+  });
+
+  it('keeps the files that fit, in their order', () => {
+    const [a, b, c, d] = [pic(1), doc(2), pic(3), pic(4)];
+    expect(withinLimits([a, b, c, d], 2)).toEqual([a, b, c]);
+    expect(withinLimits([], 2)).toEqual([]);
   });
 });
 

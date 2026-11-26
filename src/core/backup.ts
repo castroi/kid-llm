@@ -1,5 +1,5 @@
 import { MAX_IMAGE_BYTES } from '../ai/providers';
-import { MAX_DOCUMENT_BYTES, MAX_PICTURE_BYTES } from './attachment';
+import { MAX_DOCUMENT_BYTES, MAX_DOCUMENTS, MAX_PICTURE_BYTES, MAX_PICTURES } from './attachment';
 import { sanitizeChat, type Chat } from './chat';
 
 /*
@@ -8,7 +8,12 @@ import { sanitizeChat, type Chat } from './chat';
  *   the head line, then for each chat:
  *     4 bytes: how long the chat's text is (big-endian)
  *     the chat as JSON (UTF-8); where a picture or a file was, `bytes` holds its length
- *     the bytes of those pictures and files, in the order the JSON names them
+ *     the bytes of those pictures and files, in the order the JSON names them (in each
+ *     message: its attached files in their order, then the picture of a drawing answer)
+ *
+ * Version 2 keeps a message's attached files as a list (`attachments`); version 1 kept one
+ * (`attachment`). Both are read; only version 2 is written, so an older app refuses a newer
+ * file as a whole instead of reading its pictures' bytes as the next chat.
  *
  * Pictures are written as they are, not as text, and the chats are read from the phone and
  * from a file one chat at a time. The file being made is still held whole in memory until it
@@ -21,16 +26,20 @@ import { sanitizeChat, type Chat } from './chat';
  */
 
 /** The file's first bytes: how a backup of this app, in this format, is told from any other file. */
-export const BACKUP_HEAD = 'kid-llm backup 1\n';
+export const BACKUP_HEAD = 'kid-llm backup 2\n';
+/** The heads this app reads: this format, and the one before it, with one file per message. */
+const READABLE_HEADS = ['kid-llm backup 1\n', BACKUP_HEAD];
 
 /** The longest text of one chat that is read back. Far more than a real chat; a file that claims more is damaged. */
 export const MAX_CHAT_TEXT_BYTES = 64 * 1024 * 1024;
 
 /** The largest picture or file a chat can hold; a record that claims more is damaged. */
 const MAX_FILE_BYTES = Math.max(MAX_IMAGE_BYTES, MAX_PICTURE_BYTES, MAX_DOCUMENT_BYTES);
+/** The most files one message holds. */
+const MAX_FILES_PER_MESSAGE = MAX_PICTURES + MAX_DOCUMENTS;
 
-/** The fields of a message that hold bytes, in the order they are written. */
-const FILE_FIELDS = ['attachment', 'image'] as const;
+/** The fields of a message that hold bytes, in the order they are written: a list of files, one file (version 1), a drawn picture. */
+const FILE_FIELDS = ['attachments', 'attachment', 'image'] as const;
 
 function ascii(text: string): ArrayBuffer {
   const bytes = new Uint8Array(new ArrayBuffer(text.length));
@@ -55,9 +64,9 @@ export function encodeChat(chat: Chat): ArrayBuffer[] {
   };
   const record = {
     ...clean,
-    messages: clean.messages.map(({ attachment, image, ...rest }) => ({
+    messages: clean.messages.map(({ attachments, image, ...rest }) => ({
       ...rest,
-      ...(attachment ? { attachment: lengthOf(attachment) } : {}),
+      ...(attachments ? { attachments: attachments.map(lengthOf) } : {}),
       ...(image ? { image: lengthOf(image) } : {}),
     })),
   };
@@ -115,11 +124,12 @@ export async function readBackup(file: BackupSource, onRecord: (chat: Chat | nul
     }
   };
 
-  const expected = new Uint8Array(backupHead());
-  const head = await read(0, expected.length);
-  if (!head || !new Uint8Array(head).every((byte, i) => byte === expected[i])) throw new BackupError();
+  // Every readable head is as long as this one.
+  const head = await read(0, BACKUP_HEAD.length);
+  const known = head && READABLE_HEADS.some((wanted) => new Uint8Array(head).every((byte, i) => byte === wanted.charCodeAt(i)));
+  if (!known) throw new BackupError();
 
-  let at = expected.length;
+  let at = BACKUP_HEAD.length;
   while (at < file.size) {
     const size = await read(at, 4);
     if (!size) return false;
@@ -141,14 +151,19 @@ export async function readBackup(file: BackupSource, onRecord: (chat: Chat | nul
     for (const message of messages) {
       if (!message || typeof message !== 'object') continue;
       for (const field of FILE_FIELDS) {
-        const holder = (message as Record<string, unknown>)[field];
-        if (!holder || typeof holder !== 'object') continue;
-        const wanted = (holder as Record<string, unknown>).bytes;
-        if (typeof wanted !== 'number' || !Number.isInteger(wanted) || wanted < 1 || wanted > MAX_FILE_BYTES) return false;
-        const bytes = await read(at, wanted);
-        if (!bytes) return false;
-        at += wanted;
-        (holder as Record<string, unknown>).bytes = bytes;
+        const value = (message as Record<string, unknown>)[field];
+        // A list holds one file per entry; more than a message can hold means the file is damaged.
+        const holders: unknown[] = field === 'attachments' ? (Array.isArray(value) ? value : []) : [value];
+        if (holders.length > MAX_FILES_PER_MESSAGE) return false;
+        for (const holder of holders) {
+          if (!holder || typeof holder !== 'object') continue;
+          const wanted = (holder as Record<string, unknown>).bytes;
+          if (typeof wanted !== 'number' || !Number.isInteger(wanted) || wanted < 1 || wanted > MAX_FILE_BYTES) return false;
+          const bytes = await read(at, wanted);
+          if (!bytes) return false;
+          at += wanted;
+          (holder as Record<string, unknown>).bytes = bytes;
+        }
       }
     }
     await onRecord(sanitizeChat(raw));

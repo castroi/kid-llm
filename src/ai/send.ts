@@ -100,7 +100,7 @@ export interface ChatRequest {
    * child baseline is then left out. Anything else, also when it is missing, means a child.
    */
   kidUse?: boolean;
-  /** The whole conversation so far, oldest first, ending with her new message. A message may carry a file she attached. */
+  /** The whole conversation so far, oldest first, ending with her new message. A message may carry files she attached. */
   messages: ChatMessage[];
   apiKey: string;
   /** Search mode: look the question up on the web first. What is sent in `messages` then also reaches a search engine, through the provider. */
@@ -132,7 +132,7 @@ export async function sendChat(req: ChatRequest): Promise<ChatResult> {
   const apiKey = usableKey(req.apiKey);
   // A search call never carries a file: what goes into a search also reaches a search engine.
   const messages: ChatMessage[] = req.webSearch === true ? req.messages.map(({ role, content }) => ({ role, content })) : req.messages;
-  const withFile = messages.some((message) => message.file !== undefined);
+  const withFile = messages.some((message) => (message.files ?? []).length > 0);
   // One switch picks the built-in lines and the written ones, so a child's call can't carry
   // what was written for a parent, and a parent's can't carry what was written for her.
   const kidUse = req.kidUse !== false;

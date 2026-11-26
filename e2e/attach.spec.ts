@@ -12,7 +12,7 @@ async function setUp(page: Page) {
   await page.evaluate(() => {
     localStorage.setItem(
       'kid-llm.settings.v1',
-      JSON.stringify({ provider: 'venice', models: { chat: 'test-model', math: 'test-model', search: 'test-model' }, fileModel: 'vision-model', systemPrompt: '', childName: '', dailyLimit: null }),
+      JSON.stringify({ provider: 'venice', models: { chat: 'test-model', math: 'test-model', search: 'test-model' }, fileModel: 'vision-model', fileModelImages: 5, systemPrompt: '', childName: '', dailyLimit: null }),
     );
     localStorage.setItem('kid-llm.key.venice', 'not-a-real-key');
   });
@@ -74,9 +74,11 @@ test('a picture she picks is redrawn under the production security headers and w
   expect(size.height).toBeGreaterThanOrEqual(48);
 
   await page.getByLabel('קובץ לצירוף').setInputFiles({ name: 'IMG_0042.png', mimeType: 'image/png', buffer: png(200, 120) });
-  // The picture was opened and redrawn (the CSP allows blob: pictures), and waits under a plain word.
-  await expect(page.locator('.attachment-chip')).toHaveText('תמונה');
-  const remove = page.getByRole('button', { name: 'הסרת הקובץ' });
+  // The picture was opened and redrawn (the CSP allows blob: pictures), and waits as a small picture with its number.
+  await expect(page.locator('.attachment-chip')).toHaveCount(1);
+  await expect(page.locator('.attachment-thumb')).toBeVisible();
+  await expect(page.locator('.attachment-chip .attachment-number')).toHaveText('1');
+  const remove = page.getByRole('button', { name: 'הסרת קובץ 1' });
   const removeSize = (await remove.boundingBox())!;
   expect(removeSize.height).toBeGreaterThanOrEqual(48);
 
@@ -118,14 +120,14 @@ test('what is kept and sent of a photo is the redrawn picture only: smaller, a J
   expect(picked.toString('latin1')).toContain(HIDDEN);
 
   await page.getByLabel('קובץ לצירוף').setInputFiles({ name: 'IMG_0042_home.png', mimeType: 'image/png', buffer: picked });
-  await expect(page.locator('.attachment-chip')).toHaveText('תמונה');
+  await expect(page.locator('.attachment-thumb')).toBeVisible();
   await page.getByLabel('הודעה').fill('מה יש בתמונה?');
 
   // No network: the message is kept on the phone exactly as it would be sent, and no call leaves the test.
   await context.setOffline(true);
   await page.getByRole('button', { name: 'שליחה' }).tap();
   await expect(page.getByText('אין אינטרנט כרגע. ננסה שוב?')).toBeVisible();
-  await expect(page.getByRole('img', { name: 'התמונה שצירפתי' })).toBeVisible();
+  await expect(page.locator('.bubble img')).toBeVisible();
 
   const kept = await page.evaluate(
     (marker) =>
@@ -137,7 +139,8 @@ test('what is kept and sent of a photo is the redrawn picture only: smaller, a J
           all.onerror = () => reject(all.error);
           all.onsuccess = () => {
             open.result.close();
-            const message = (all.result as { messages: { text: string; attachment: { kind: string; name: string; bytes: ArrayBuffer } }[] }[])[0].messages[0];
+            const stored = (all.result as { messages: { text: string; attachments: { kind: string; name: string; bytes: ArrayBuffer }[] }[] }[])[0].messages[0];
+            const message = { text: stored.text, attachment: stored.attachments[0] };
             const bytes = new Uint8Array(message.attachment.bytes);
             let latin = '';
             for (const byte of bytes) latin += String.fromCharCode(byte);
@@ -176,3 +179,61 @@ test('what is kept and sent of a photo is the redrawn picture only: smaller, a J
   await context.setOffline(false);
 });
 
+test('several pictures and documents wait as numbered chips that wrap, are each redrawn smaller, and the composer still fits the phone', async ({ page, context }) => {
+  await setUp(page);
+  await page.getByLabel('קובץ לצירוף').setInputFiles([
+    { name: 'IMG_0001.png', mimeType: 'image/png', buffer: png(2000, 1000) },
+    { name: 'IMG_0002.png', mimeType: 'image/png', buffer: png(1000, 2000) },
+    { name: 'סיכום שיעור היסטוריה על מלחמת העולם הראשונה ועל מה שקרה אחריה.pdf', mimeType: 'application/pdf', buffer: Buffer.from('%PDF-1.7 a homework sheet') },
+  ]);
+  await expect(page.locator('.attachment-chip')).toHaveCount(3);
+  await expect(page.locator('.attachment-thumb')).toHaveCount(2);
+  await expect(page.locator('.attachment-chip .attachment-number')).toHaveText(['1', '2', '3']);
+  // A long name gives way in the middle: its type stays in view.
+  await expect(page.locator('.attachment-chip .file-name-end')).toHaveText('.pdf');
+  await expect(page.locator('.attachment-chip .file-name-end')).toBeVisible();
+  for (const remove of await page.getByRole('button', { name: /^הסרת קובץ/ }).all()) expect((await remove.boundingBox())!.height).toBeGreaterThanOrEqual(48);
+
+  const viewport = page.viewportSize()!;
+  await page.getByLabel('הודעה').fill('מה ההבדל?');
+  const sendBox = (await page.getByRole('button', { name: 'שליחה' }).boundingBox())!;
+  expect(sendBox.y + sendBox.height).toBeLessThanOrEqual(viewport.height);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(viewport.width);
+
+  // No network: what would be sent is kept on the phone, and no call leaves the test.
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'שליחה' }).tap();
+  await expect(page.getByText('אין אינטרנט כרגע. ננסה שוב?')).toBeVisible();
+  await expect(page.locator('.bubble img')).toHaveCount(2);
+
+  const kept = await page.evaluate(
+    () =>
+      new Promise<{ kinds: string[]; sides: number[] }>((resolve, reject) => {
+        const open = indexedDB.open('kid-llm');
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const all = open.result.transaction('chats').objectStore('chats').getAll();
+          all.onerror = () => reject(all.error);
+          all.onsuccess = () => {
+            open.result.close();
+            const files = (all.result as { messages: { attachments: { kind: string; bytes: ArrayBuffer }[] }[] }[])[0].messages[0].attachments;
+            const pictures = files.filter((file) => file.kind === 'image');
+            Promise.all(pictures.map((file) => createImageBitmap(new Blob([file.bytes], { type: 'image/jpeg' })))).then(
+              (drawn) => resolve({ kinds: files.map((file) => file.kind), sides: drawn.map((picture) => Math.max(picture.width, picture.height)) }),
+              reject,
+            );
+          };
+        };
+      }),
+  );
+  expect(kept.kinds).toEqual(['image', 'image', 'pdf']);
+  // More than one picture in the message: each is redrawn with its long side at 1024.
+  expect(kept.sides).toEqual([1024, 1024]);
+
+  // A tap on a picture shows it over the whole screen.
+  await page.getByRole('button', { name: 'תמונה 1: הגדלה' }).tap();
+  await expect(page.locator('.viewer-picture')).toBeVisible();
+  await page.getByRole('button', { name: 'סגירת התמונה' }).tap();
+  await expect(page.locator('.viewer-picture')).toHaveCount(0);
+  await context.setOffline(false);
+});
