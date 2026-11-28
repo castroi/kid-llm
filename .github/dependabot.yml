@@ -10,6 +10,11 @@ updates:
     open-pull-requests-limit: 5
     cooldown:
       default-days: 7
+    ignore:
+      # typescript-eslint accepts only TypeScript below 6.1, so TypeScript 7 can't be installed (#56).
+      # Remove this once a typescript-eslint release supports TypeScript 7.
+      - dependency-name: typescript
+        versions: [">=7"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
