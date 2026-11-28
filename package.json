@@ -34,7 +34,7 @@
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^6.1.2",
     "@vitest/coverage-v8": "^5.1.0",
-    "eslint": "^10.0.0",
+    "eslint": "^10.15.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "fake-indexeddb": "^6.0.0",
     "globals": "^17.14.0",
